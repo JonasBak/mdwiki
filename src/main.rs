@@ -4,6 +4,8 @@
 extern crate rocket;
 
 use std::fs;
+use std::fs::File;
+use std::io::prelude::*;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -16,6 +18,34 @@ use mdbook::MDBook;
 
 use git2::{Index, IndexAddOption, Repository};
 
+const THEME_OVERRIDE_SCRIPT: &[u8] = br#"
+<script type="text/javascript">
+    window.addEventListener("load", function() {
+        const buttonDiv = document.getElementsByClassName("right-buttons")[0];
+
+        editLink = document.createElement("a");
+        editLink.href = "/edit/{{ path }}";
+        editLink.title = "Edit this page";
+
+        editIcon = document.createElement("i");
+        editIcon.className = "fa fa-edit";
+
+        editLink.appendChild(editIcon);
+        buttonDiv.appendChild(editLink);
+
+        newLink = document.createElement("a");
+        newLink.href = "/new";
+        newLink.title = "Create new page";
+
+        newIcon = document.createElement("i");
+        newIcon.className = "fa fa-plus";
+
+        newLink.appendChild(newIcon);
+        buttonDiv.appendChild(newLink);
+    });
+</script>
+"#;
+
 #[get("/")]
 async fn edit_home() -> String {
     "Hello World!".into()
@@ -26,10 +56,11 @@ struct AppState {
 }
 
 impl AppState {
-    fn setup(&self) -> Result<(), String> {
+    fn setup(&self) -> Result<Box<Path>, String> {
         let (book, repo) = self.get_book_or_initialize()?;
         book.build().map_err(|_| "failed to build book")?;
-        Ok(())
+        let build_path = Path::new(&self.book_path).join(book.config.build.build_dir);
+        Ok(build_path.into_boxed_path())
     }
     fn get_book_or_initialize(&self) -> Result<(MDBook, Repository), String> {
         let book = match MDBook::load(&self.book_path) {
@@ -84,6 +115,16 @@ impl AppState {
                 repo
             }
         };
+        let theme_dir = Path::new(&self.book_path).join("theme");
+        let theme_path = theme_dir.join("header.hbs");
+        if !theme_path.is_file() {
+            if !theme_dir.is_dir() {
+                fs::create_dir(&theme_dir).map_err(|_| "failed to create theme dir")?;
+            }
+            let mut file = File::create(&theme_path).map_err(|_| "failed to create theme file")?;
+            file.write_all(THEME_OVERRIDE_SCRIPT)
+                .map_err(|_| "failed to write theme override script")?;
+        }
         Ok((book, repo))
     }
 }
@@ -94,13 +135,13 @@ async fn main() {
 
     let state = AppState { book_path };
 
-    state.setup().unwrap();
+    let build_path = state.setup().unwrap();
 
     rocket::ignite()
         .attach(Template::fairing())
         .manage(state)
         .mount("/edit", routes![edit_home,])
-        .mount("/", StaticFiles::from("/tmp/mdwiki/book"))
+        .mount("/", StaticFiles::from(build_path))
         .launch()
         .await
         .unwrap();
