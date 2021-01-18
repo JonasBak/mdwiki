@@ -30,6 +30,11 @@ fn log_warn<T: std::fmt::Display>(err: T) -> T {
     err
 }
 
+fn is_reserved_name(path: &Path) -> bool {
+    let reserved = Path::new("SUMMARY.md");
+    return path == reserved || path.ends_with(&reserved);
+}
+
 const THEME_OVERRIDE_SCRIPT: &[u8] = br#"
 <script type="text/javascript">
     window.addEventListener("load", function() {
@@ -78,16 +83,27 @@ async fn new_page_post(
     form: Form<NewForm>,
     state: State<'_, AppState>,
 ) -> Result<Redirect, Status> {
-    let path = Path::new(&state.book_path).join("src").join(&form.file);
+    let file = Path::new(&form.file);
+    // TODO handle path traversal
+    let path = Path::new(&state.book_path).join("src").join(&file);
     if !state.can_create(&path) {
         return Err(Status::BadRequest);
     }
+
+    if let Some(parent) = path.parent() {
+        if !parent.is_dir() {
+            fs::create_dir_all(parent)
+                .map_err(log_warn)
+                .map_err(|_| Status::InternalServerError)?;
+        }
+    }
+
     fs::write(path, &form.content)
         .map_err(log_warn)
         .map_err(|_| Status::InternalServerError)?;
 
     state
-        .on_created(&form.file)
+        .on_created(&file)
         .map_err(log_warn)
         .map_err(|_| Status::InternalServerError)?;
 
@@ -174,12 +190,16 @@ impl AppState {
         let build_path = Path::new(&self.book_path).join(book.config.build.build_dir);
         Ok(build_path.into_boxed_path())
     }
-    fn on_created(&self, file: &String) -> Result<(), String> {
-        info!("running post-create hooks for {}", file);
+    fn on_created(&self, file: &Path) -> Result<(), String> {
+        info!("running post-create hooks for {}", file.to_string_lossy());
+
+        info!("updating summary");
+        self.update_summary()?;
+
         let (book, repo) = self.get_book(false)?;
 
-        info!("committing {}", file);
-        self.commit(&repo, format!("Create {}", file))?;
+        info!("committing {}", file.to_string_lossy());
+        self.commit(&repo, format!("Create {}", file.to_string_lossy()))?;
 
         info!("rebuilding book");
         book.build()
@@ -220,6 +240,8 @@ impl AppState {
                         format!("could not create directory '{}': {}", self.book_path, e)
                     })?;
                 }
+
+                // TODO create index.md and build summary
 
                 let mut cfg = Config::default();
                 cfg.book.title = Some("mdwiki".into());
@@ -287,6 +309,51 @@ impl AppState {
         }
         Ok((book, repo))
     }
+    fn update_summary(&self) -> Result<(), String> {
+        let mut queue = vec![Some(Path::new(&self.book_path).join("src"))];
+        let mut files = Vec::new();
+        let mut i = 0;
+        while i < queue.len() {
+            let path = queue[i].take().unwrap();
+            if path.is_dir() {
+                for entry in fs::read_dir(path).unwrap() {
+                    queue.push(Some(entry.unwrap().path()));
+                }
+            } else {
+                files.push(path);
+            }
+            i += 1;
+        }
+        let prefix = Path::new(&self.book_path).join("src");
+        // TODO sort and handle levels
+        let relative_md_files = files
+            .iter()
+            .filter(|path| path.extension().map(|ext| ext == "md").unwrap_or(false))
+            .filter(|path| !is_reserved_name(path))
+            .filter_map(|path| path.strip_prefix(&prefix).ok())
+            .collect::<Vec<_>>();
+        let summary = relative_md_files
+            .into_iter()
+            .map(|path| {
+                let level = path.ancestors().count() - 2;
+                let page_title = path
+                    .file_stem()
+                    .map(|f| f.to_str())
+                    .flatten()
+                    .unwrap_or("")
+                    .replace("_", " ");
+                let link_to = path.to_str().unwrap_or("");
+                return format!("{1:0$}- [{2}](./{3})", level * 2, "", page_title, link_to);
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let summary_path = Path::new(&self.book_path).join("src/SUMMARY.md");
+        fs::write(summary_path, summary)
+            .map_err(|e| format!("could not write summary file: {}", e))?;
+
+        Ok(())
+    }
     fn commit(&self, repo: &Repository, commit_message: String) -> Result<(), String> {
         let mut index = repo
             .index()
@@ -319,17 +386,34 @@ impl AppState {
         Ok(())
     }
     fn can_edit(&self, path: &Path) -> bool {
-        if path.extension().map(|ext| ext != "md").unwrap_or(true) {
+        let prefix = Path::new(&self.book_path).join("src");
+        if !path.starts_with(&prefix) {
+            return false;
+        } else if path.extension().map(|ext| ext != "md").unwrap_or(true) {
             return false;
         } else if !path.is_file() {
+            return false;
+        } else if is_reserved_name(path) {
             return false;
         }
         true
     }
     fn can_create(&self, path: &Path) -> bool {
-        if path.extension().map(|ext| ext != "md").unwrap_or(true) {
+        let prefix = Path::new(&self.book_path).join("src");
+        if !path.starts_with(&prefix) {
+            return false;
+        } else if path
+            .strip_prefix(&prefix)
+            .map(|path| path.ancestors().count() - 2)
+            .unwrap_or(99)
+            > 3
+        {
+            return false;
+        } else if path.extension().map(|ext| ext != "md").unwrap_or(true) {
             return false;
         } else if path.is_file() {
+            return false;
+        } else if is_reserved_name(path) {
             return false;
         }
         true
