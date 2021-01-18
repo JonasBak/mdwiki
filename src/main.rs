@@ -3,14 +3,16 @@
 #[macro_use]
 extern crate rocket;
 
+#[macro_use]
+extern crate log;
+
 use std::fs;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 
 use rocket::http::Status;
-use rocket::request::{self, Form, FromRequest, Request};
-use rocket::response::status::NotFound;
+use rocket::request::Form;
 use rocket::response::Redirect;
 use rocket::State;
 use rocket_contrib::serve::StaticFiles;
@@ -19,9 +21,14 @@ use rocket_contrib::templates::Template;
 use mdbook::config::Config;
 use mdbook::MDBook;
 
-use git2::{Index, IndexAddOption, Repository};
+use git2::{IndexAddOption, Repository};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+
+fn log_warn<T: std::fmt::Display>(err: T) -> T {
+    warn!("{}", err);
+    err
+}
 
 const THEME_OVERRIDE_SCRIPT: &[u8] = br#"
 <script type="text/javascript">
@@ -79,7 +86,9 @@ async fn edit_page(file: PathBuf, state: State<'_, AppState>) -> Result<Template
     } else if !path.is_file() {
         return Err(Status::NotFound);
     }
-    let file_content = fs::read_to_string(&path).map_err(|_| Status::NotFound)?;
+    let file_content = fs::read_to_string(&path)
+        .map_err(log_warn)
+        .map_err(|_| Status::NotFound)?;
     let context = EditContext { file, file_content };
     Ok(Template::render("edit_page", &context))
 }
@@ -96,9 +105,14 @@ async fn edit_page_post(
     } else if !path.is_file() {
         return Err(Status::NotFound);
     }
-    fs::write(path, &form.content).map_err(|_| Status::InternalServerError)?;
+    fs::write(path, &form.content)
+        .map_err(log_warn)
+        .map_err(|_| Status::InternalServerError)?;
 
-    state.on_edited().map_err(|_| Status::InternalServerError)?;
+    state
+        .on_edited()
+        .map_err(log_warn)
+        .map_err(|_| Status::InternalServerError)?;
 
     let mut html_file = file.clone();
     html_file.set_extension("html");
@@ -117,8 +131,16 @@ struct AppState {
 
 impl AppState {
     fn setup(&self) -> Result<Box<Path>, String> {
-        let (book, repo) = self.get_book_or_initialize()?;
-        book.build().map_err(|_| "failed to build book")?;
+        info!(
+            "setting up mdwiki with configuration: book path = {}",
+            self.book_path
+        );
+
+        let (book, _repo) = self.get_book_or_initialize()?;
+
+        book.build()
+            .map_err(|e| format!("failed to build book: {}", e))?;
+
         let build_path = Path::new(&self.book_path).join(book.config.build.build_dir);
         Ok(build_path.into_boxed_path())
     }
@@ -129,13 +151,22 @@ impl AppState {
     }
     fn get_book_or_initialize(&self) -> Result<(MDBook, Repository), String> {
         let book = match MDBook::load(&self.book_path) {
-            Ok(book) => book,
+            Ok(book) => {
+                info!("using existing mdbook at {}", self.book_path);
+                book
+            }
             Err(_) => {
+                info!(
+                    "could not find existing mdbook, creating new at {}",
+                    self.book_path
+                );
+
                 if !Path::new(&self.book_path).is_dir() {
                     fs::create_dir(&self.book_path).map_err(|e| {
                         format!("could not create directory '{}': {}", self.book_path, e)
                     })?;
                 }
+
                 let mut cfg = Config::default();
                 cfg.book.title = Some("mdwiki".into());
                 cfg.book.authors.push("mdwiki".into());
@@ -148,8 +179,13 @@ impl AppState {
             }
         };
         let repo = match Repository::open(&self.book_path) {
-            Ok(repo) => repo,
+            Ok(repo) => {
+                info!("using existing git repository");
+                repo
+            }
             Err(_) => {
+                info!("could not find existing git repository, initializing new");
+
                 let repo = Repository::init(&self.book_path)
                     .map_err(|e| format!("failed to init repo at '{}': {}", self.book_path, e))?;
 
@@ -184,6 +220,7 @@ impl AppState {
         let theme_path = theme_dir.join("header.hbs");
         // TODO ignore theme dir
         if !theme_path.is_file() {
+            debug!("adding mdwiki theme script");
             if !theme_dir.is_dir() {
                 fs::create_dir(&theme_dir).map_err(|_| "failed to create theme dir")?;
             }
@@ -197,6 +234,8 @@ impl AppState {
 
 #[rocket::main]
 async fn main() {
+    env_logger::init();
+
     let book_path = "/tmp/mdwiki".into();
 
     let state = AppState { book_path };
