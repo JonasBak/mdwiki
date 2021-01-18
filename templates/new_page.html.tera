@@ -1,7 +1,7 @@
 <html>
     <head>
-        <link rel="stylesheet" href="{{ path_to_root }}css/variables.css">
-        <link rel="stylesheet" href="{{ path_to_root }}css/general.css">
+        <link rel="stylesheet" href="/css/variables.css">
+        <link rel="stylesheet" href="/css/general.css">
     </head>
     <body>
         <h1>New page</h1>

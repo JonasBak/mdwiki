@@ -110,7 +110,7 @@ async fn edit_page_post(
         .map_err(|_| Status::InternalServerError)?;
 
     state
-        .on_edited()
+        .on_edited(&file)
         .map_err(log_warn)
         .map_err(|_| Status::InternalServerError)?;
 
@@ -136,26 +136,72 @@ impl AppState {
             self.book_path
         );
 
-        let (book, _repo) = self.get_book_or_initialize()?;
+        let (book, _repo) = self.get_book(true)?;
 
+        info!("running initial build",);
         book.build()
             .map_err(|e| format!("failed to build book: {}", e))?;
 
         let build_path = Path::new(&self.book_path).join(book.config.build.build_dir);
         Ok(build_path.into_boxed_path())
     }
-    fn on_edited(&self) -> Result<(), String> {
-        // TODO add & commit
-        // TODO rebuild mdbook
+    fn on_edited(&self, file: &PathBuf) -> Result<(), String> {
+        info!("running post-edit hooks for {}", file.to_string_lossy());
+        let (book, repo) = self.get_book(false)?;
+
+        info!("committing changes to {}", file.to_string_lossy());
+        let mut index = repo
+            .index()
+            .map_err(|e| format!("failed to get the index file: {}", e))?;
+        index
+            .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
+            .map_err(|e| format!("failed to add files: {}", e))?;
+        index
+            .write()
+            .map_err(|e| format!("failed to write to index: {}", e))?;
+        let tree_id = index
+            .write_tree()
+            .map_err(|e| format!("failed to write tree: {}", e))?;
+
+        {
+            let sig = repo
+                .signature()
+                .map_err(|e| format!("failed to get signature: {}", e))?;
+            let tree = repo
+                .find_tree(tree_id)
+                .map_err(|e| format!("failed to find tree: {}", e))?;
+            let parent = repo
+                .head()
+                .map_err(|e| format!("failed to get parent: {}", e))?
+                .peel_to_commit()
+                .map_err(|e| format!("failed to get parent: {}", e))?;
+            repo.commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                &format!("Edit {}", file.to_string_lossy()),
+                &tree,
+                &[&parent],
+            )
+            .map_err(|e| format!("failed to create initial commit: {}", e))?;
+        }
+
+        info!("rebuilding book");
+        book.build()
+            .map_err(|e| format!("failed to build book: {}", e))?;
+
         Ok(())
     }
-    fn get_book_or_initialize(&self) -> Result<(MDBook, Repository), String> {
+    fn get_book(&self, init: bool) -> Result<(MDBook, Repository), String> {
         let book = match MDBook::load(&self.book_path) {
             Ok(book) => {
                 info!("using existing mdbook at {}", self.book_path);
                 book
             }
             Err(_) => {
+                if !init {
+                    return Err(format!("could not find book at {}", self.book_path));
+                }
                 info!(
                     "could not find existing mdbook, creating new at {}",
                     self.book_path
@@ -184,6 +230,9 @@ impl AppState {
                 repo
             }
             Err(_) => {
+                if !init {
+                    return Err(format!("could not find git repo at {}", self.book_path));
+                }
                 info!("could not find existing git repository, initializing new");
 
                 let repo = Repository::init(&self.book_path)
@@ -219,7 +268,7 @@ impl AppState {
         let theme_dir = Path::new(&self.book_path).join("theme");
         let theme_path = theme_dir.join("header.hbs");
         // TODO ignore theme dir
-        if !theme_path.is_file() {
+        if !theme_path.is_file() && init {
             debug!("adding mdwiki theme script");
             if !theme_dir.is_dir() {
                 fs::create_dir(&theme_dir).map_err(|_| "failed to create theme dir")?;
