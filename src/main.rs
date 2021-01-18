@@ -6,6 +6,8 @@ extern crate rocket;
 #[macro_use]
 extern crate log;
 
+use std::cmp::Ordering;
+use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
 use std::io::prelude::*;
@@ -93,6 +95,21 @@ async fn new_page_post(
     if let Some(parent) = path.parent() {
         if !parent.is_dir() {
             fs::create_dir_all(parent)
+                .map_err(log_warn)
+                .map_err(|_| Status::InternalServerError)?;
+        }
+    }
+
+    let mut ancestors = file.ancestors();
+    ancestors.next();
+    for dir in ancestors {
+        let index = Path::new(&state.book_path)
+            .join("src")
+            .join(&dir)
+            .join("README.md");
+        if !index.is_file() {
+            debug!("creating {}", index.to_string_lossy());
+            fs::write(index, "# Generated")
                 .map_err(log_warn)
                 .map_err(|_| Status::InternalServerError)?;
         }
@@ -241,17 +258,20 @@ impl AppState {
                     })?;
                 }
 
-                // TODO create index.md and build summary
-
                 let mut cfg = Config::default();
                 cfg.book.title = Some("mdwiki".into());
                 cfg.book.authors.push("mdwiki".into());
 
-                MDBook::init(&self.book_path)
+                let book = MDBook::init(&self.book_path)
                     .create_gitignore(true)
                     .with_config(cfg)
                     .build()
-                    .map_err(|_| format!("failed to initialize wiki at '{}'", self.book_path))?
+                    .map_err(|_| format!("failed to initialize wiki at '{}'", self.book_path))?;
+
+                fs::write(Path::new(&self.book_path).join("src/README.md"), "# mdwiki")
+                    .map_err(|e| format!("could not write index file: {}", e))?;
+
+                book
             }
         };
         let repo = match Repository::open(&self.book_path) {
@@ -325,16 +345,35 @@ impl AppState {
             i += 1;
         }
         let prefix = Path::new(&self.book_path).join("src");
-        // TODO sort and handle levels
-        let relative_md_files = files
+        let mut relative_md_files = files
             .iter()
             .filter(|path| path.extension().map(|ext| ext == "md").unwrap_or(false))
             .filter(|path| !is_reserved_name(path))
             .filter_map(|path| path.strip_prefix(&prefix).ok())
             .collect::<Vec<_>>();
+        relative_md_files.sort_by(|a, b| {
+            if a.parent() != b.parent() {
+                return a.cmp(b);
+            }
+            if Some(OsStr::new("README")) == a.file_stem() {
+                return Ordering::Less;
+            }
+            if Some(OsStr::new("README")) == b.file_stem() {
+                return Ordering::Greater;
+            }
+            a.cmp(b)
+        });
         let summary = relative_md_files
             .into_iter()
-            .map(|path| {
+            .map(|mut path| {
+                let link_to = path.to_str().unwrap_or("");
+                if Some(OsStr::new("README")) == path.file_stem() {
+                    if let Some(parent) = path.parent() {
+                        if parent.parent().is_some() {
+                            path = parent;
+                        }
+                    }
+                }
                 let level = path.ancestors().count() - 2;
                 let page_title = path
                     .file_stem()
@@ -342,7 +381,6 @@ impl AppState {
                     .flatten()
                     .unwrap_or("")
                     .replace("_", " ");
-                let link_to = path.to_str().unwrap_or("");
                 return format!("{1:0$}- [{2}](./{3})", level * 2, "", page_title, link_to);
             })
             .collect::<Vec<_>>()
