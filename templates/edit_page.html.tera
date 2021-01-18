@@ -4,12 +4,14 @@
         <link rel="stylesheet" href="/css/general.css">
     </head>
     <body>
+        <h1>Edit {{ file }}</h1>
         <div class="page-wrapper">
             <form method="POST">
                 <label for="content">
-                    <h2 class="header">Edit {{ file }}</h2>
+                    Content:
                 </label>
-                <textarea id="content" name="content" rows="20" cols="50">{{ file_content }}</textarea>
+                <br/>
+                <textarea id="content" name="content" rows="20" cols="50">{{ content }}</textarea>
                 <br><br>
                 <input type="submit" value="Submit">
             </form>

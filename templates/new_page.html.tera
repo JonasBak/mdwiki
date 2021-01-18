@@ -1,9 +1,26 @@
-<html>
+<html class="light">
     <head>
         <link rel="stylesheet" href="/css/variables.css">
         <link rel="stylesheet" href="/css/general.css">
     </head>
     <body>
         <h1>New page</h1>
+        <div class="page-wrapper">
+            <form method="POST">
+                <label for="file">
+                    Filename:
+                </label>
+                <br/>
+                <input id="file" name="file"/>
+                <br/>
+                <label for="content">
+                    Content:
+                </label>
+                <br/>
+                <textarea id="content" name="content" rows="20" cols="50"></textarea>
+                <br><br>
+                <input type="submit" value="Submit">
+            </form>
+        <div>
     </body>
 </html>

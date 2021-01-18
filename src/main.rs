@@ -61,16 +61,50 @@ const THEME_OVERRIDE_SCRIPT: &[u8] = br#"
 #[derive(Serialize)]
 struct NewContext {}
 
+#[derive(FromForm)]
+struct NewForm {
+    file: String,
+    content: String,
+}
+
 #[get("/")]
 async fn new_page() -> Template {
     let context = NewContext {};
     Template::render("new_page", &context)
 }
 
+#[post("/", data = "<form>")]
+async fn new_page_post(
+    form: Form<NewForm>,
+    state: State<'_, AppState>,
+) -> Result<Redirect, Status> {
+    let path = Path::new(&state.book_path).join("src").join(&form.file);
+    if !state.can_create(&path) {
+        return Err(Status::BadRequest);
+    }
+    fs::write(path, &form.content)
+        .map_err(log_warn)
+        .map_err(|_| Status::InternalServerError)?;
+
+    state
+        .on_created(&form.file)
+        .map_err(log_warn)
+        .map_err(|_| Status::InternalServerError)?;
+
+    let html_file = Path::new(&form.file).with_extension("html");
+    return Ok(Redirect::to(format!(
+        "/{}",
+        html_file
+            .to_str()
+            .ok_or_else(|| Status::InternalServerError)?
+            .to_string()
+    )));
+}
+
 #[derive(Serialize)]
 struct EditContext {
     file: PathBuf,
-    file_content: String,
+    content: String,
 }
 
 #[derive(FromForm)]
@@ -81,15 +115,13 @@ struct EditForm {
 #[get("/<file..>")]
 async fn edit_page(file: PathBuf, state: State<'_, AppState>) -> Result<Template, Status> {
     let path = Path::new(&state.book_path).join("src").join(&file);
-    if path.extension().map(|ext| ext != "md").unwrap_or(true) {
-        return Err(Status::NotFound);
-    } else if !path.is_file() {
+    if !state.can_edit(&path) {
         return Err(Status::NotFound);
     }
-    let file_content = fs::read_to_string(&path)
+    let content = fs::read_to_string(&path)
         .map_err(log_warn)
         .map_err(|_| Status::NotFound)?;
-    let context = EditContext { file, file_content };
+    let context = EditContext { file, content };
     Ok(Template::render("edit_page", &context))
 }
 
@@ -100,9 +132,7 @@ async fn edit_page_post(
     state: State<'_, AppState>,
 ) -> Result<Redirect, Status> {
     let path = Path::new(&state.book_path).join("src").join(&file);
-    if path.extension().map(|ext| ext != "md").unwrap_or(true) {
-        return Err(Status::NotFound);
-    } else if !path.is_file() {
+    if !state.can_edit(&path) {
         return Err(Status::NotFound);
     }
     fs::write(path, &form.content)
@@ -114,8 +144,7 @@ async fn edit_page_post(
         .map_err(log_warn)
         .map_err(|_| Status::InternalServerError)?;
 
-    let mut html_file = file.clone();
-    html_file.set_extension("html");
+    let html_file = file.clone().with_extension("html");
     return Ok(Redirect::to(format!(
         "/{}",
         html_file
@@ -145,46 +174,25 @@ impl AppState {
         let build_path = Path::new(&self.book_path).join(book.config.build.build_dir);
         Ok(build_path.into_boxed_path())
     }
+    fn on_created(&self, file: &String) -> Result<(), String> {
+        info!("running post-create hooks for {}", file);
+        let (book, repo) = self.get_book(false)?;
+
+        info!("committing {}", file);
+        self.commit(&repo, format!("Create {}", file))?;
+
+        info!("rebuilding book");
+        book.build()
+            .map_err(|e| format!("failed to build book: {}", e))?;
+
+        Ok(())
+    }
     fn on_edited(&self, file: &PathBuf) -> Result<(), String> {
         info!("running post-edit hooks for {}", file.to_string_lossy());
         let (book, repo) = self.get_book(false)?;
 
         info!("committing changes to {}", file.to_string_lossy());
-        let mut index = repo
-            .index()
-            .map_err(|e| format!("failed to get the index file: {}", e))?;
-        index
-            .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
-            .map_err(|e| format!("failed to add files: {}", e))?;
-        index
-            .write()
-            .map_err(|e| format!("failed to write to index: {}", e))?;
-        let tree_id = index
-            .write_tree()
-            .map_err(|e| format!("failed to write tree: {}", e))?;
-
-        {
-            let sig = repo
-                .signature()
-                .map_err(|e| format!("failed to get signature: {}", e))?;
-            let tree = repo
-                .find_tree(tree_id)
-                .map_err(|e| format!("failed to find tree: {}", e))?;
-            let parent = repo
-                .head()
-                .map_err(|e| format!("failed to get parent: {}", e))?
-                .peel_to_commit()
-                .map_err(|e| format!("failed to get parent: {}", e))?;
-            repo.commit(
-                Some("HEAD"),
-                &sig,
-                &sig,
-                &format!("Edit {}", file.to_string_lossy()),
-                &tree,
-                &[&parent],
-            )
-            .map_err(|e| format!("failed to create initial commit: {}", e))?;
-        }
+        self.commit(&repo, format!("Edit {}", file.to_string_lossy()))?;
 
         info!("rebuilding book");
         book.build()
@@ -279,6 +287,53 @@ impl AppState {
         }
         Ok((book, repo))
     }
+    fn commit(&self, repo: &Repository, commit_message: String) -> Result<(), String> {
+        let mut index = repo
+            .index()
+            .map_err(|e| format!("failed to get the index file: {}", e))?;
+        index
+            .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
+            .map_err(|e| format!("failed to add files: {}", e))?;
+        index
+            .write()
+            .map_err(|e| format!("failed to write to index: {}", e))?;
+        let tree_id = index
+            .write_tree()
+            .map_err(|e| format!("failed to write tree: {}", e))?;
+
+        {
+            let sig = repo
+                .signature()
+                .map_err(|e| format!("failed to get signature: {}", e))?;
+            let tree = repo
+                .find_tree(tree_id)
+                .map_err(|e| format!("failed to find tree: {}", e))?;
+            let parent = repo
+                .head()
+                .map_err(|e| format!("failed to get parent: {}", e))?
+                .peel_to_commit()
+                .map_err(|e| format!("failed to get parent: {}", e))?;
+            repo.commit(Some("HEAD"), &sig, &sig, &commit_message, &tree, &[&parent])
+                .map_err(|e| format!("failed to create initial commit: {}", e))?;
+        }
+        Ok(())
+    }
+    fn can_edit(&self, path: &Path) -> bool {
+        if path.extension().map(|ext| ext != "md").unwrap_or(true) {
+            return false;
+        } else if !path.is_file() {
+            return false;
+        }
+        true
+    }
+    fn can_create(&self, path: &Path) -> bool {
+        if path.extension().map(|ext| ext != "md").unwrap_or(true) {
+            return false;
+        } else if path.is_file() {
+            return false;
+        }
+        true
+    }
 }
 
 #[rocket::main]
@@ -294,7 +349,7 @@ async fn main() {
     rocket::ignite()
         .attach(Template::fairing())
         .manage(state)
-        .mount("/new", routes![new_page,])
+        .mount("/new", routes![new_page, new_page_post])
         .mount("/edit", routes![edit_page, edit_page_post])
         .mount("/", StaticFiles::from(build_path))
         .launch()
