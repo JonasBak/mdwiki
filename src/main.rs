@@ -6,10 +6,13 @@ extern crate rocket;
 use std::fs;
 use std::fs::File;
 use std::io::prelude::*;
-use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::path::{Path, PathBuf};
 
-use rocket::request::{self, FromRequest, Request};
+use rocket::http::Status;
+use rocket::request::{self, Form, FromRequest, Request};
+use rocket::response::status::NotFound;
+use rocket::response::Redirect;
+use rocket::State;
 use rocket_contrib::serve::StaticFiles;
 use rocket_contrib::templates::Template;
 
@@ -17,6 +20,8 @@ use mdbook::config::Config;
 use mdbook::MDBook;
 
 use git2::{Index, IndexAddOption, Repository};
+
+use serde::{Deserialize, Serialize};
 
 const THEME_OVERRIDE_SCRIPT: &[u8] = br#"
 <script type="text/javascript">
@@ -46,9 +51,64 @@ const THEME_OVERRIDE_SCRIPT: &[u8] = br#"
 </script>
 "#;
 
+#[derive(Serialize)]
+struct NewContext {}
+
 #[get("/")]
-async fn edit_home() -> String {
-    "Hello World!".into()
+async fn new_page() -> Template {
+    let context = NewContext {};
+    Template::render("new_page", &context)
+}
+
+#[derive(Serialize)]
+struct EditContext {
+    file: PathBuf,
+    file_content: String,
+}
+
+#[derive(FromForm)]
+struct EditForm {
+    content: String,
+}
+
+#[get("/<file..>")]
+async fn edit_page(file: PathBuf, state: State<'_, AppState>) -> Result<Template, Status> {
+    let path = Path::new(&state.book_path).join("src").join(&file);
+    if path.extension().map(|ext| ext != "md").unwrap_or(true) {
+        return Err(Status::NotFound);
+    } else if !path.is_file() {
+        return Err(Status::NotFound);
+    }
+    let file_content = fs::read_to_string(&path).map_err(|_| Status::NotFound)?;
+    let context = EditContext { file, file_content };
+    Ok(Template::render("edit_page", &context))
+}
+
+#[post("/<file..>", data = "<form>")]
+async fn edit_page_post(
+    file: PathBuf,
+    form: Form<EditForm>,
+    state: State<'_, AppState>,
+) -> Result<Redirect, Status> {
+    let path = Path::new(&state.book_path).join("src").join(&file);
+    if path.extension().map(|ext| ext != "md").unwrap_or(true) {
+        return Err(Status::NotFound);
+    } else if !path.is_file() {
+        return Err(Status::NotFound);
+    }
+    fs::write(path, &form.content).map_err(|_| Status::InternalServerError)?;
+
+    state.on_edited().map_err(|_| Status::InternalServerError)?;
+
+    let mut html_file = file.clone();
+    html_file.set_extension("html");
+    return Ok(Redirect::to(format!(
+        "/{}",
+        html_file
+            .to_str()
+            .ok_or_else(|| Status::InternalServerError)?
+            .to_string()
+    )));
 }
 
 struct AppState {
@@ -61,6 +121,11 @@ impl AppState {
         book.build().map_err(|_| "failed to build book")?;
         let build_path = Path::new(&self.book_path).join(book.config.build.build_dir);
         Ok(build_path.into_boxed_path())
+    }
+    fn on_edited(&self) -> Result<(), String> {
+        // TODO add & commit
+        // TODO rebuild mdbook
+        Ok(())
     }
     fn get_book_or_initialize(&self) -> Result<(MDBook, Repository), String> {
         let book = match MDBook::load(&self.book_path) {
@@ -117,6 +182,7 @@ impl AppState {
         };
         let theme_dir = Path::new(&self.book_path).join("theme");
         let theme_path = theme_dir.join("header.hbs");
+        // TODO ignore theme dir
         if !theme_path.is_file() {
             if !theme_dir.is_dir() {
                 fs::create_dir(&theme_dir).map_err(|_| "failed to create theme dir")?;
@@ -140,7 +206,8 @@ async fn main() {
     rocket::ignite()
         .attach(Template::fairing())
         .manage(state)
-        .mount("/edit", routes![edit_home,])
+        .mount("/new", routes![new_page,])
+        .mount("/edit", routes![edit_page, edit_page_post])
         .mount("/", StaticFiles::from(build_path))
         .launch()
         .await

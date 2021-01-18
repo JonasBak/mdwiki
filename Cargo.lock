@@ -1161,6 +1161,7 @@ dependencies = [
  "mdbook",
  "rocket",
  "rocket_contrib",
+ "serde",
 ]
 
 [[package]]

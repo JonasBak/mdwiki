@@ -1,0 +1,18 @@
+<html class="light">
+    <head>
+        <link rel="stylesheet" href="/css/variables.css">
+        <link rel="stylesheet" href="/css/general.css">
+    </head>
+    <body>
+        <div class="page-wrapper">
+            <form method="POST">
+                <label for="content">
+                    <h2 class="header">Edit {{ file }}</h2>
+                </label>
+                <textarea id="content" name="content" rows="20" cols="50">{{ file_content }}</textarea>
+                <br><br>
+                <input type="submit" value="Submit">
+            </form>
+        <div>
+    </body>
+</html>
