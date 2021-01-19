@@ -10,7 +10,7 @@ edition = "2018"
 mdbook = "0.4"
 git2 = "0.13"
 rocket = { git = "https://github.com/SergioBenitez/Rocket" }
-rocket_contrib = { git = "https://github.com/SergioBenitez/Rocket", features=["tera_templates", "serve"]}
+rocket_contrib = { git = "https://github.com/SergioBenitez/Rocket", features=["tera_templates", "serve", "helmet"]}
 serde = "1.0"
 log = "0.4"
 env_logger = "0.8"

@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html class="light">
     <head>
+        <link rel="icon" href="/favicon.svg">
+
         <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
         <meta name="description" content="Create a new wiki page">
         <meta name="viewport" content="width=device-width, initial-scale=1">

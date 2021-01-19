@@ -17,6 +17,7 @@ use rocket::http::Status;
 use rocket::request::Form;
 use rocket::response::Redirect;
 use rocket::State;
+use rocket_contrib::helmet::SpaceHelmet;
 use rocket_contrib::serve::StaticFiles;
 use rocket_contrib::templates::Template;
 
@@ -422,7 +423,7 @@ impl AppState {
             .join("\n");
 
         let summary_path = Path::new(&self.book_path).join("src/SUMMARY.md");
-        fs::write(summary_path, summary)
+        fs::write(summary_path, format!("# Summary\n\n{}\n", summary))
             .map_err(|e| format!("could not write summary file: {}", e))?;
 
         Ok(())
@@ -505,6 +506,7 @@ async fn main() {
 
     rocket::ignite()
         .attach(Template::fairing())
+        .attach(SpaceHelmet::default())
         .manage(state)
         .mount("/new", routes![new_page, new_page_post])
         .mount("/edit", routes![edit_page, edit_page_post])
