@@ -9,8 +9,6 @@ extern crate log;
 use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::fs;
-use std::fs::File;
-use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 
 use rocket::http::Status;
@@ -32,18 +30,32 @@ fn log_warn<T: std::fmt::Display>(err: T) -> T {
     err
 }
 
+const RESERVED_NAMES: &[&str] = &["SUMMARY.md", "index.md"];
+
 fn is_reserved_name(path: &Path) -> bool {
-    let reserved = Path::new("SUMMARY.md");
-    return path == reserved || path.ends_with(&reserved);
+    RESERVED_NAMES
+        .iter()
+        .find(|reserved| path.ends_with(reserved))
+        .is_some()
 }
 
-const THEME_OVERRIDE_SCRIPT: &[u8] = br#"
+const MDWIKI_README: &str = r#"
+# mdwiki
+
+> Lorem ipsum dolor sit amet, consectetur adipiscing elit. In efficitur augue sed scelerisque finibus.
+
+## Instructions
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Mauris consectetur quis magna ut convallis. Nam tincidunt efficitur consectetur. Fusce erat massa, convallis a erat sed, convallis congue arcu. Sed auctor turpis quis diam euismod, in venenatis ipsum luctus. Praesent eget lobortis elit, at luctus sem.
+"#;
+
+const THEME_OVERRIDE_SCRIPT: &str = r#"
 <script type="text/javascript">
     window.addEventListener("load", function() {
         const buttonDiv = document.getElementsByClassName("right-buttons")[0];
 
         editLink = document.createElement("a");
-        editLink.href = "/edit/{{ path }}";
+        editLink.href = "/edit/{{ path }}".replace(/index.md$/, "README.md");
         editLink.title = "Edit this page";
 
         editIcon = document.createElement("i");
@@ -109,9 +121,18 @@ async fn new_page_post(
             .join("README.md");
         if !index.is_file() {
             debug!("creating {}", index.to_string_lossy());
-            fs::write(index, "# Generated")
-                .map_err(log_warn)
-                .map_err(|_| Status::InternalServerError)?;
+            fs::write(
+                index,
+                format!(
+                    "# {}",
+                    dir.file_stem()
+                        .map(OsStr::to_str)
+                        .flatten()
+                        .unwrap_or("TODO")
+                ),
+            )
+            .map_err(log_warn)
+            .map_err(|_| Status::InternalServerError)?;
         }
     }
 
@@ -262,16 +283,21 @@ impl AppState {
                 cfg.book.title = Some("mdwiki".into());
                 cfg.book.authors.push("mdwiki".into());
 
-                let book = MDBook::init(&self.book_path)
+                MDBook::init(&self.book_path)
                     .create_gitignore(true)
                     .with_config(cfg)
                     .build()
                     .map_err(|_| format!("failed to initialize wiki at '{}'", self.book_path))?;
 
-                fs::write(Path::new(&self.book_path).join("src/README.md"), "# mdwiki")
-                    .map_err(|e| format!("could not write index file: {}", e))?;
+                fs::write(
+                    Path::new(&self.book_path).join("src/README.md"),
+                    MDWIKI_README,
+                )
+                .map_err(|e| format!("could not write index file: {}", e))?;
 
-                book
+                self.update_summary()?;
+
+                MDBook::load(&self.book_path).unwrap()
             }
         };
         let repo = match Repository::open(&self.book_path) {
@@ -323,9 +349,9 @@ impl AppState {
             if !theme_dir.is_dir() {
                 fs::create_dir(&theme_dir).map_err(|_| "failed to create theme dir")?;
             }
-            let mut file = File::create(&theme_path).map_err(|_| "failed to create theme file")?;
-            file.write_all(THEME_OVERRIDE_SCRIPT)
-                .map_err(|_| "failed to write theme override script")?;
+
+            fs::write(&theme_path, THEME_OVERRIDE_SCRIPT)
+                .map_err(|e| format!("failed to write theme script: {}", e))?;
         }
         Ok((book, repo))
     }
