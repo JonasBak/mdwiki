@@ -9,6 +9,8 @@ extern crate log;
 use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::fs;
+use std::fs::OpenOptions;
+use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 
 use rocket::http::Status;
@@ -297,6 +299,14 @@ impl AppState {
 
                 self.update_summary()?;
 
+                if let Ok(mut gitignore) = OpenOptions::new()
+                    .write(true)
+                    .append(true)
+                    .open(Path::new(&self.book_path).join(".gitignore"))
+                {
+                    let _ = writeln!(gitignore, "theme/head.hbs");
+                }
+
                 MDBook::load(&self.book_path).unwrap()
             }
         };
@@ -342,8 +352,7 @@ impl AppState {
             }
         };
         let theme_dir = Path::new(&self.book_path).join("theme");
-        let theme_path = theme_dir.join("header.hbs");
-        // TODO ignore theme dir
+        let theme_path = theme_dir.join("head.hbs");
         if !theme_path.is_file() && init {
             debug!("adding mdwiki theme script");
             if !theme_dir.is_dir() {
