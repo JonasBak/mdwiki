@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html class="light">
     <head>
         <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
@@ -8,6 +9,8 @@
         <link rel="stylesheet" href="/css/variables.css">
         <link rel="stylesheet" href="/css/general.css">
         <link rel="stylesheet" href="/css/chrome.css">
+
+        <link rel="stylesheet" href="/FontAwesome/css/font-awesome.css">
     </head>
     <body>
         <div id="page-wrapper" class="page-wrapper">
@@ -15,6 +18,9 @@
                 <div id="menu-bar-hover-placeholder"></div>
                 <div id="menu-bar" class="menu-bar sticky bordered">
                     <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Go back" aria-label="Go back" onClick="window.history.back()">
+                            <i class="fa fa-chevron-left"></i>
+                        </button>
                     </div>
 
                     <h1 class="menu-title">New Page</h1>
