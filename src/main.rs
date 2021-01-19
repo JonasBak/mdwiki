@@ -6,11 +6,10 @@ extern crate rocket;
 #[macro_use]
 extern crate log;
 
-use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::prelude::*;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use rocket::http::Status;
@@ -211,6 +210,11 @@ async fn edit_page_post(
     )));
 }
 
+enum WikiTree {
+    File(Box<Path>),
+    Directory(Box<Path>, Vec<WikiTree>),
+}
+
 struct AppState {
     book_path: String,
 }
@@ -365,65 +369,95 @@ impl AppState {
         }
         Ok((book, repo))
     }
-    fn update_summary(&self) -> Result<(), String> {
-        let mut queue = vec![Some(Path::new(&self.book_path).join("src"))];
-        let mut files = Vec::new();
-        let mut i = 0;
-        while i < queue.len() {
-            let path = queue[i].take().unwrap();
+    fn get_wiki_tree(&self) -> WikiTree {
+        fn visit(prefix: &Path, path: &Path) -> Option<WikiTree> {
+            let relative_path = path.strip_prefix(&prefix).unwrap();
             if path.is_dir() {
-                for entry in fs::read_dir(path).unwrap() {
-                    queue.push(Some(entry.unwrap().path()));
-                }
+                let children = fs::read_dir(path)
+                    .unwrap()
+                    .into_iter()
+                    .map(|entry| visit(prefix, &entry.unwrap().path()))
+                    .filter_map(|a| a)
+                    .collect::<Vec<_>>();
+                return Some(WikiTree::Directory(
+                    relative_path.to_path_buf().into_boxed_path(),
+                    children,
+                ));
             } else {
-                files.push(path);
+                if path.extension().map(|ext| ext != "md").unwrap_or(true) {
+                    return None;
+                } else if path.file_stem().map(|ext| ext == "README").unwrap_or(true) {
+                    return None;
+                } else if is_reserved_name(path) {
+                    return None;
+                }
+                return Some(WikiTree::File(
+                    relative_path.to_path_buf().into_boxed_path(),
+                ));
             }
-            i += 1;
         }
         let prefix = Path::new(&self.book_path).join("src");
-        let mut relative_md_files = files
-            .iter()
-            .filter(|path| path.extension().map(|ext| ext == "md").unwrap_or(false))
-            .filter(|path| !is_reserved_name(path))
-            .filter_map(|path| path.strip_prefix(&prefix).ok())
-            .collect::<Vec<_>>();
-        relative_md_files.sort_by(|a, b| {
-            if a.parent() != b.parent() {
-                return a.cmp(b);
-            }
-            if Some(OsStr::new("README")) == a.file_stem() {
-                return Ordering::Less;
-            }
-            if Some(OsStr::new("README")) == b.file_stem() {
-                return Ordering::Greater;
-            }
-            a.cmp(b)
-        });
-        let summary = relative_md_files
-            .into_iter()
-            .map(|mut path| {
-                let link_to = path.to_str().unwrap_or("");
-                if Some(OsStr::new("README")) == path.file_stem() {
-                    if let Some(parent) = path.parent() {
-                        if parent.parent().is_some() {
-                            path = parent;
-                        }
+        visit(&prefix, &Path::new(&self.book_path).join("src")).unwrap()
+    }
+    fn update_summary(&self) -> Result<(), String> {
+        let tree = self.get_wiki_tree();
+
+        fn build_summary(summary: &mut String, tree: WikiTree) {
+            use std::fmt::Write;
+            match tree {
+                WikiTree::File(path) => {
+                    let level = path.ancestors().count() - 2;
+                    let link_to = path.to_str().unwrap();
+                    let page_title = path
+                        .file_stem()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .replace("_", " ");
+                    write!(
+                        summary,
+                        "{1:0$}- [{2}]({3})\n",
+                        level * 2,
+                        "",
+                        page_title,
+                        link_to
+                    )
+                    .unwrap();
+                }
+                WikiTree::Directory(path, children) => {
+                    if &*path == Path::new("") {
+                        write!(summary, "[Home](README.md)\n\n---\n\n",).unwrap();
+                    } else {
+                        let level = path.ancestors().count() - 2;
+                        let readme_path = path.join("README.md");
+                        let link_to = readme_path.to_str().unwrap();
+                        let page_title = path
+                            .file_stem()
+                            .map(|p| p.to_str())
+                            .flatten()
+                            .unwrap_or("README")
+                            .replace("_", " ");
+                        write!(
+                            summary,
+                            "{1:0$}- [{2}]({3})\n",
+                            level * 2,
+                            "",
+                            page_title,
+                            link_to
+                        )
+                        .unwrap();
+                    }
+                    for child in children {
+                        build_summary(summary, child);
                     }
                 }
-                let level = path.ancestors().count() - 2;
-                let page_title = path
-                    .file_stem()
-                    .map(|f| f.to_str())
-                    .flatten()
-                    .unwrap_or("")
-                    .replace("_", " ");
-                return format!("{1:0$}- [{2}](./{3})", level * 2, "", page_title, link_to);
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+            }
+        }
+        let mut summary = "# Summary\n\n".to_string();
+        build_summary(&mut summary, tree);
 
         let summary_path = Path::new(&self.book_path).join("src/SUMMARY.md");
-        fs::write(summary_path, format!("# Summary\n\n{}\n", summary))
+        fs::write(summary_path, summary)
             .map_err(|e| format!("could not write summary file: {}", e))?;
 
         Ok(())
