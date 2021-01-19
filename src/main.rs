@@ -10,7 +10,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use rocket::http::Status;
 use rocket::request::Form;
@@ -44,6 +44,15 @@ fn is_reserved_name(path: &Path) -> bool {
             .iter()
             .find(|reserved| path.starts_with(reserved))
             .is_some()
+}
+
+fn path_is_simple(path: &Path) -> bool {
+    path.components()
+        .find(|comp| match comp {
+            Component::Normal(_) => false,
+            _ => true,
+        })
+        .is_none()
 }
 
 const SUMMARY_HEAD: &str = r#"
@@ -116,11 +125,10 @@ async fn new_page_post(
     state: State<'_, AppState>,
 ) -> Result<Redirect, Status> {
     let file = Path::new(&form.file);
-    // TODO handle path traversal
-    let path = Path::new(&state.book_path).join("src").join(&file);
-    if !state.can_create(&path) {
+    if !state.can_create(&file) {
         return Err(Status::BadRequest);
     }
+    let path = Path::new(&state.book_path).join("src").join(&file);
 
     if let Some(parent) = path.parent() {
         if !parent.is_dir() {
@@ -186,10 +194,10 @@ struct EditForm {
 
 #[get("/<file..>")]
 async fn edit_page(file: PathBuf, state: State<'_, AppState>) -> Result<Template, Status> {
-    let path = Path::new(&state.book_path).join("src").join(&file);
-    if !state.can_edit(&path) {
+    if !state.can_edit(&file) {
         return Err(Status::NotFound);
     }
+    let path = Path::new(&state.book_path).join("src").join(&file);
     let content = fs::read_to_string(&path)
         .map_err(log_warn)
         .map_err(|_| Status::NotFound)?;
@@ -203,10 +211,10 @@ async fn edit_page_post(
     form: Form<EditForm>,
     state: State<'_, AppState>,
 ) -> Result<Redirect, Status> {
-    let path = Path::new(&state.book_path).join("src").join(&file);
-    if !state.can_edit(&path) {
+    if !state.can_edit(&file) {
         return Err(Status::NotFound);
     }
+    let path = Path::new(&state.book_path).join("src").join(&file);
     fs::write(path, &form.content)
         .map_err(log_warn)
         .map_err(|_| Status::InternalServerError)?;
@@ -510,38 +518,35 @@ impl AppState {
         Ok(())
     }
     fn can_edit(&self, path: &Path) -> bool {
-        let prefix = Path::new(&self.book_path).join("src");
-        if !path.starts_with(&prefix) {
+        if !path_is_simple(path) {
+            return false;
+        } else if path.extension().map(|ext| ext != "md").unwrap_or(true) {
+            return false;
+        } else if is_reserved_name(path) {
             return false;
         }
-        let relative_path = path.strip_prefix(&prefix).unwrap();
-        if path.extension().map(|ext| ext != "md").unwrap_or(true) {
-            return false;
-        } else if !path.is_file() {
-            return false;
-        } else if is_reserved_name(relative_path) {
+
+        let full_path = Path::new(&self.book_path).join("src").join(&path);
+
+        if !full_path.is_file() {
             return false;
         }
         true
     }
     fn can_create(&self, path: &Path) -> bool {
-        let prefix = Path::new(&self.book_path).join("src");
-        if !path.starts_with(&prefix) {
+        if !path_is_simple(path) {
             return false;
-        }
-        let relative_path = path.strip_prefix(&prefix).unwrap();
-        if path
-            .strip_prefix(&prefix)
-            .map(|path| path.ancestors().count() - 2)
-            .unwrap_or(99)
-            > 3
-        {
+        } else if path.ancestors().count() > 5 {
             return false;
         } else if path.extension().map(|ext| ext != "md").unwrap_or(true) {
             return false;
-        } else if path.is_file() {
+        } else if is_reserved_name(path) {
             return false;
-        } else if is_reserved_name(relative_path) {
+        }
+
+        let full_path = Path::new(&self.book_path).join("src").join(&path);
+
+        if full_path.is_file() {
             return false;
         }
         true
