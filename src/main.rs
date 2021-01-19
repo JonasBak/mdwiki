@@ -33,13 +33,29 @@ fn log_warn<T: std::fmt::Display>(err: T) -> T {
 }
 
 const RESERVED_NAMES: &[&str] = &["SUMMARY.md", "index.md"];
+const RESERVED_PREFIXES: &[&str] = &["new", "edit"];
 
 fn is_reserved_name(path: &Path) -> bool {
     RESERVED_NAMES
         .iter()
         .find(|reserved| path.ends_with(reserved))
         .is_some()
+        || RESERVED_PREFIXES
+            .iter()
+            .find(|reserved| path.starts_with(reserved))
+            .is_some()
 }
+
+const SUMMARY_HEAD: &str = r#"
+# Summary
+
+[Home](README.md)
+
+[Summary](SUMMARY.md)
+
+---
+
+"#;
 
 const MDWIKI_README: &str = r#"
 # mdwiki
@@ -388,7 +404,7 @@ impl AppState {
                     return None;
                 } else if path.file_stem().map(|ext| ext == "README").unwrap_or(true) {
                     return None;
-                } else if is_reserved_name(path) {
+                } else if is_reserved_name(relative_path) {
                     return None;
                 }
                 return Some(WikiTree::File(
@@ -426,7 +442,7 @@ impl AppState {
                 }
                 WikiTree::Directory(path, children) => {
                     if &*path == Path::new("") {
-                        write!(summary, "[Home](README.md)\n\n---\n\n",).unwrap();
+                        summary.write_str(SUMMARY_HEAD).unwrap();
                     } else {
                         let level = path.ancestors().count() - 2;
                         let readme_path = path.join("README.md");
@@ -453,7 +469,7 @@ impl AppState {
                 }
             }
         }
-        let mut summary = "# Summary\n\n".to_string();
+        let mut summary = String::new();
         build_summary(&mut summary, tree);
 
         let summary_path = Path::new(&self.book_path).join("src/SUMMARY.md");
@@ -497,11 +513,13 @@ impl AppState {
         let prefix = Path::new(&self.book_path).join("src");
         if !path.starts_with(&prefix) {
             return false;
-        } else if path.extension().map(|ext| ext != "md").unwrap_or(true) {
+        }
+        let relative_path = path.strip_prefix(&prefix).unwrap();
+        if path.extension().map(|ext| ext != "md").unwrap_or(true) {
             return false;
         } else if !path.is_file() {
             return false;
-        } else if is_reserved_name(path) {
+        } else if is_reserved_name(relative_path) {
             return false;
         }
         true
@@ -510,7 +528,9 @@ impl AppState {
         let prefix = Path::new(&self.book_path).join("src");
         if !path.starts_with(&prefix) {
             return false;
-        } else if path
+        }
+        let relative_path = path.strip_prefix(&prefix).unwrap();
+        if path
             .strip_prefix(&prefix)
             .map(|path| path.ancestors().count() - 2)
             .unwrap_or(99)
@@ -521,7 +541,7 @@ impl AppState {
             return false;
         } else if path.is_file() {
             return false;
-        } else if is_reserved_name(path) {
+        } else if is_reserved_name(relative_path) {
             return false;
         }
         true
