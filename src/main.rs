@@ -8,9 +8,8 @@ extern crate log;
 
 use std::ffi::OsStr;
 use std::fs;
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use rocket::http::Status;
 use rocket::request::Form;
@@ -20,7 +19,6 @@ use rocket_contrib::helmet::SpaceHelmet;
 use rocket_contrib::serve::StaticFiles;
 use rocket_contrib::templates::Template;
 
-use mdbook::config::Config;
 use mdbook::MDBook;
 
 use git2::{IndexAddOption, Repository};
@@ -87,48 +85,53 @@ async fn new_page_post(
     if !state.can_create(&file) {
         return Err(Status::BadRequest);
     }
-    let path = Path::new(&state.book_path).join("src").join(&file);
 
-    if let Some(parent) = path.parent() {
-        if !parent.is_dir() {
-            fs::create_dir_all(parent)
+    {
+        let _ = state.dir_lock.lock().unwrap();
+
+        let path = Path::new(&state.book_path).join("src").join(&file);
+
+        if let Some(parent) = path.parent() {
+            if !parent.is_dir() {
+                fs::create_dir_all(parent)
+                    .map_err(log_warn)
+                    .map_err(|_| Status::InternalServerError)?;
+            }
+        }
+
+        let mut ancestors = file.ancestors();
+        ancestors.next();
+        for dir in ancestors {
+            let index = Path::new(&state.book_path)
+                .join("src")
+                .join(&dir)
+                .join("README.md");
+            if !index.is_file() {
+                debug!("creating {}", index.to_string_lossy());
+                fs::write(
+                    index,
+                    format!(
+                        "# {}",
+                        dir.file_stem()
+                            .map(OsStr::to_str)
+                            .flatten()
+                            .unwrap_or("TODO")
+                    ),
+                )
                 .map_err(log_warn)
                 .map_err(|_| Status::InternalServerError)?;
+            }
         }
-    }
 
-    let mut ancestors = file.ancestors();
-    ancestors.next();
-    for dir in ancestors {
-        let index = Path::new(&state.book_path)
-            .join("src")
-            .join(&dir)
-            .join("README.md");
-        if !index.is_file() {
-            debug!("creating {}", index.to_string_lossy());
-            fs::write(
-                index,
-                format!(
-                    "# {}",
-                    dir.file_stem()
-                        .map(OsStr::to_str)
-                        .flatten()
-                        .unwrap_or("TODO")
-                ),
-            )
+        fs::write(path, &form.content)
             .map_err(log_warn)
             .map_err(|_| Status::InternalServerError)?;
-        }
+
+        state
+            .on_created(&file)
+            .map_err(log_warn)
+            .map_err(|_| Status::InternalServerError)?;
     }
-
-    fs::write(path, &form.content)
-        .map_err(log_warn)
-        .map_err(|_| Status::InternalServerError)?;
-
-    state
-        .on_created(&file)
-        .map_err(log_warn)
-        .map_err(|_| Status::InternalServerError)?;
 
     let html_file = Path::new(&form.file).with_extension("html");
     return Ok(Redirect::to(format!(
@@ -173,17 +176,22 @@ async fn edit_page_post(
     if !state.can_edit(&file) {
         return Err(Status::NotFound);
     }
-    let path = Path::new(&state.book_path).join("src").join(&file);
-    fs::write(path, &form.content)
-        .map_err(log_warn)
-        .map_err(|_| Status::InternalServerError)?;
 
-    state
-        .on_edited(&file)
-        .map_err(log_warn)
-        .map_err(|_| Status::InternalServerError)?;
+    {
+        let _ = state.dir_lock.lock().unwrap();
 
-    let html_file = file.clone().with_extension("html");
+        let path = Path::new(&state.book_path).join("src").join(&file);
+        fs::write(path, &form.content)
+            .map_err(log_warn)
+            .map_err(|_| Status::InternalServerError)?;
+
+        state
+            .on_edited(&file)
+            .map_err(log_warn)
+            .map_err(|_| Status::InternalServerError)?;
+    }
+
+    let html_file = file.with_extension("html");
     return Ok(Redirect::to(format!(
         "/{}",
         html_file
@@ -200,6 +208,7 @@ enum WikiTree {
 
 struct AppState {
     book_path: String,
+    dir_lock: Arc<Mutex<()>>,
 }
 
 impl AppState {
@@ -470,11 +479,11 @@ impl AppState {
     fn can_create(&self, path: &Path) -> bool {
         if !path_is_simple(path) {
             return false;
-        } else if path.ancestors().count() > 5 {
-            return false;
         } else if path.extension().map(|ext| ext != "md").unwrap_or(true) {
             return false;
         } else if is_reserved_name(path) {
+            return false;
+        } else if path.ancestors().count() > 5 {
             return false;
         }
 
@@ -493,7 +502,10 @@ async fn main() {
 
     let book_path = "/tmp/mdwiki".into();
 
-    let state = AppState { book_path };
+    let state = AppState {
+        book_path,
+        dir_lock: Arc::new(Mutex::new(())),
+    };
 
     let build_path = state.setup().unwrap();
 
