@@ -81,6 +81,7 @@ async fn new_page_post(
     form: Form<NewForm>,
     state: State<'_, AppState>,
 ) -> Result<Redirect, Status> {
+    // TODO check for legal characters in path
     let file = Path::new(&form.file);
     if !state.can_create(&file) {
         return Err(Status::BadRequest);
@@ -204,6 +205,15 @@ async fn edit_page_post(
 enum WikiTree {
     File(Box<Path>),
     Directory(Box<Path>, Vec<WikiTree>),
+}
+
+impl WikiTree {
+    fn path(&self) -> &Path {
+        match self {
+            WikiTree::File(path) => &path,
+            WikiTree::Directory(path, _) => &path,
+        }
+    }
 }
 
 struct AppState {
@@ -333,12 +343,13 @@ impl AppState {
         fn visit(prefix: &Path, path: &Path) -> Option<WikiTree> {
             let relative_path = path.strip_prefix(&prefix).unwrap();
             if path.is_dir() {
-                let children = fs::read_dir(path)
+                let mut children = fs::read_dir(path)
                     .unwrap()
                     .into_iter()
                     .map(|entry| visit(prefix, &entry.unwrap().path()))
                     .filter_map(|a| a)
                     .collect::<Vec<_>>();
+                children.sort_by(|a, b| a.path().cmp(b.path()));
                 return Some(WikiTree::Directory(
                     relative_path.to_path_buf().into_boxed_path(),
                     children,
