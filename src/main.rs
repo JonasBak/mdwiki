@@ -141,6 +141,7 @@ async fn new_page_post(
         html_file
             .to_str()
             .ok_or_else(|| Status::InternalServerError)?
+            .replace("README.html", "")
             .to_string()
     )));
 }
@@ -199,6 +200,7 @@ async fn edit_page_post(
         html_file
             .to_str()
             .ok_or_else(|| Status::InternalServerError)?
+            .replace("README.html", "")
             .to_string()
     )));
 }

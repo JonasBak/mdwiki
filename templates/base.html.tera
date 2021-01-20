@@ -15,6 +15,21 @@
         <link rel="stylesheet" href="/css/chrome.css">
 
         <link rel="stylesheet" href="/FontAwesome/css/font-awesome.css">
+
+        <style type="text/css">
+            #file-content {
+                width: 100%;
+                min-height: 30em;
+            }
+            #submit-button {
+                background: none;
+                border: none;
+                cursor: pointer;
+                font-size: 1.2em;
+                color: var(--icons-hover);
+                padding: 5px 10px;
+            }
+        </style>
     </head>
     <body>
         <div class="page-wrapper">

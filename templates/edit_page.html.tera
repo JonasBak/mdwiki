@@ -7,8 +7,10 @@
             Content:
         </label>
         <br/>
-        <textarea id="content" name="content" rows="20" cols="50">{{ content }}</textarea>
+        <textarea id="file-content" name="content">{{ content }}</textarea>
         <br><br>
-        <input type="submit" value="Submit">
+        <button id="submit-button" type="submit">
+            <i class="fa fa-save"></i> Save page
+        </button>
     </form>
 {% endblock content %}
