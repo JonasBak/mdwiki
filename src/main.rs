@@ -57,9 +57,11 @@ fn path_is_simple(path: &Path) -> bool {
 
 const SUMMARY_HEAD: &str = include_str!("../files/summary_head.md");
 
-const MDWIKI_README: &str = include_str!("../files/README.md");
-
 const THEME_OVERRIDE_SCRIPT: &str = include_str!("../files/theme_override_head.html.hbs");
+
+const MDWIKI_README: &str = include_str!("../files/default_README.md");
+const MDWIKI_BOOK_TOML: &str = include_str!("../files/default_book.toml");
+const MDWIKI_GITIGNORE: &str = include_str!("../files/default_gitignore");
 
 #[derive(Serialize)]
 struct NewContext {}
@@ -247,6 +249,23 @@ impl AppState {
         Ok(())
     }
     fn get_book(&self, init: bool) -> Result<(MDBook, Repository), String> {
+        let book_path = Path::new(&self.book_path);
+        let book_src_path = book_path.join("src");
+        let repo = match Repository::open(&self.book_path) {
+            Ok(repo) => {
+                info!("using existing git repository");
+                repo
+            }
+            Err(_) => {
+                if !init {
+                    return Err(format!("could not find git repo at {}", self.book_path));
+                }
+                info!("could not find existing git repository, initializing new");
+
+                Repository::init(&self.book_path)
+                    .map_err(|e| format!("failed to init repo at '{}': {}", self.book_path, e))?
+            }
+        };
         let book = match MDBook::load(&self.book_path) {
             Ok(book) => {
                 info!("using existing mdbook at {}", self.book_path);
@@ -261,83 +280,34 @@ impl AppState {
                     self.book_path
                 );
 
-                if !Path::new(&self.book_path).is_dir() {
-                    fs::create_dir(&self.book_path).map_err(|e| {
+                if !book_path.is_dir() {
+                    fs::create_dir(&book_path).map_err(|e| {
                         format!("could not create directory '{}': {}", self.book_path, e)
                     })?;
                 }
+                if !book_src_path.is_dir() {
+                    fs::create_dir(&book_src_path).map_err(|e| {
+                        format!("could not create directory '{}/src': {}", self.book_path, e)
+                    })?;
+                }
 
-                let mut cfg = Config::default();
-                cfg.book.title = Some("mdwiki".into());
-                cfg.book.authors.push("mdwiki".into());
-
-                MDBook::init(&self.book_path)
-                    .create_gitignore(true)
-                    .with_config(cfg)
-                    .build()
-                    .map_err(|_| format!("failed to initialize wiki at '{}'", self.book_path))?;
-
-                fs::write(
-                    Path::new(&self.book_path).join("src/README.md"),
-                    MDWIKI_README,
-                )
-                .map_err(|e| format!("could not write index file: {}", e))?;
+                fs::write(book_path.join("book.toml"), MDWIKI_BOOK_TOML)
+                    .map_err(|e| format!("could not write book.toml: {}", e))?;
+                fs::write(book_path.join(".gitignore"), MDWIKI_GITIGNORE)
+                    .map_err(|e| format!("could not write gitignore: {}", e))?;
+                fs::write(book_src_path.join("README.md"), MDWIKI_README)
+                    .map_err(|e| format!("could not write index file: {}", e))?;
 
                 self.update_summary()?;
 
-                if let Ok(mut gitignore) = OpenOptions::new()
-                    .write(true)
-                    .append(true)
-                    .open(Path::new(&self.book_path).join(".gitignore"))
-                {
-                    let _ = writeln!(gitignore, "theme/head.hbs");
-                }
+                let book = MDBook::load(&self.book_path).unwrap();
 
-                MDBook::load(&self.book_path).unwrap()
+                self.commit(&repo, "Initial mdwiki commit".into())?;
+
+                book
             }
         };
-        let repo = match Repository::open(&self.book_path) {
-            Ok(repo) => {
-                info!("using existing git repository");
-                repo
-            }
-            Err(_) => {
-                if !init {
-                    return Err(format!("could not find git repo at {}", self.book_path));
-                }
-                info!("could not find existing git repository, initializing new");
-
-                let repo = Repository::init(&self.book_path)
-                    .map_err(|e| format!("failed to init repo at '{}': {}", self.book_path, e))?;
-
-                let mut index = repo
-                    .index()
-                    .map_err(|e| format!("failed to get the index file: {}", e))?;
-                index
-                    .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
-                    .map_err(|e| format!("failed to add files: {}", e))?;
-                index
-                    .write()
-                    .map_err(|e| format!("failed to write to index: {}", e))?;
-                let tree_id = index
-                    .write_tree()
-                    .map_err(|e| format!("failed to write tree: {}", e))?;
-
-                {
-                    let sig = repo
-                        .signature()
-                        .map_err(|e| format!("failed to get signature: {}", e))?;
-                    let tree = repo
-                        .find_tree(tree_id)
-                        .map_err(|e| format!("failed to find tree: {}", e))?;
-                    repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-                        .map_err(|e| format!("failed to create initial commit: {}", e))?;
-                }
-
-                repo
-            }
-        };
-        let theme_dir = Path::new(&self.book_path).join("theme");
+        let theme_dir = book_path.join("theme");
         let theme_path = theme_dir.join("head.hbs");
         if !theme_path.is_file() && init {
             debug!("adding mdwiki theme script");
@@ -466,11 +436,18 @@ impl AppState {
                 .map_err(|e| format!("failed to find tree: {}", e))?;
             let parent = repo
                 .head()
-                .map_err(|e| format!("failed to get parent: {}", e))?
-                .peel_to_commit()
-                .map_err(|e| format!("failed to get parent: {}", e))?;
-            repo.commit(Some("HEAD"), &sig, &sig, &commit_message, &tree, &[&parent])
-                .map_err(|e| format!("failed to create initial commit: {}", e))?;
+                .ok()
+                .map(|head| head.peel_to_commit().ok())
+                .flatten();
+            repo.commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                &commit_message,
+                &tree,
+                &parent.iter().collect::<Vec<_>>(),
+            )
+            .map_err(|e| format!("failed to create initial commit: {}", e))?;
         }
         Ok(())
     }

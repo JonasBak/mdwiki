@@ -1,0 +1,6 @@
+[book]
+authors = ["mdwiki"]
+language = "en"
+multilingual = false
+src = "src"
+title = "mdwiki"
