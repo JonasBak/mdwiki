@@ -7,6 +7,9 @@
 Run:
 
 ```bash
+# required because of rocket.rs
+rustup override set nightly
+# create new mdwiki instance at /tmp/mdwiki
 RUST_LOG=info MDWIKI_PATH=/tmp/mdwiki cargo run
 ```
 

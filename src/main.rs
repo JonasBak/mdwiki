@@ -72,16 +72,13 @@ struct NewForm {
 }
 
 #[get("/")]
-async fn new_page() -> Template {
+fn new_page() -> Template {
     let context = NewContext {};
     Template::render("new_page", &context)
 }
 
 #[post("/", data = "<form>")]
-async fn new_page_post(
-    form: Form<NewForm>,
-    state: State<'_, AppState>,
-) -> Result<Redirect, Status> {
+fn new_page_post(form: Form<NewForm>, state: State<'_, AppState>) -> Result<Redirect, Status> {
     // TODO check for legal characters in path
     let file = Path::new(&form.file);
     if !state.can_create(&file) {
@@ -158,7 +155,7 @@ struct EditForm {
 }
 
 #[get("/<file..>")]
-async fn edit_page(file: PathBuf, state: State<'_, AppState>) -> Result<Template, Status> {
+fn edit_page(file: PathBuf, state: State<'_, AppState>) -> Result<Template, Status> {
     if !state.can_edit(&file) {
         return Err(Status::NotFound);
     }
@@ -171,7 +168,7 @@ async fn edit_page(file: PathBuf, state: State<'_, AppState>) -> Result<Template
 }
 
 #[post("/<file..>", data = "<form>")]
-async fn edit_page_post(
+fn edit_page_post(
     file: PathBuf,
     form: Form<EditForm>,
     state: State<'_, AppState>,
