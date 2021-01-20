@@ -55,54 +55,11 @@ fn path_is_simple(path: &Path) -> bool {
         .is_none()
 }
 
-const SUMMARY_HEAD: &str = r#"
-# Summary
+const SUMMARY_HEAD: &str = include_str!("../files/summary_head.md");
 
-[Home](README.md)
+const MDWIKI_README: &str = include_str!("../files/README.md");
 
-[Summary](SUMMARY.md)
-
----
-
-"#;
-
-const MDWIKI_README: &str = r#"
-# mdwiki
-
-> Lorem ipsum dolor sit amet, consectetur adipiscing elit. In efficitur augue sed scelerisque finibus.
-
-## Instructions
-
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Mauris consectetur quis magna ut convallis. Nam tincidunt efficitur consectetur. Fusce erat massa, convallis a erat sed, convallis congue arcu. Sed auctor turpis quis diam euismod, in venenatis ipsum luctus. Praesent eget lobortis elit, at luctus sem.
-"#;
-
-const THEME_OVERRIDE_SCRIPT: &str = r#"
-<script type="text/javascript">
-    window.addEventListener("load", function() {
-        const buttonDiv = document.getElementsByClassName("right-buttons")[0];
-
-        editLink = document.createElement("a");
-        editLink.href = "/edit/{{ path }}".replace(/index.md$/, "README.md");
-        editLink.title = "Edit this page";
-
-        editIcon = document.createElement("i");
-        editIcon.className = "fa fa-edit";
-
-        editLink.appendChild(editIcon);
-        buttonDiv.appendChild(editLink);
-
-        newLink = document.createElement("a");
-        newLink.href = "/new";
-        newLink.title = "Create new page";
-
-        newIcon = document.createElement("i");
-        newIcon.className = "fa fa-plus";
-
-        newLink.appendChild(newIcon);
-        buttonDiv.appendChild(newLink);
-    });
-</script>
-"#;
+const THEME_OVERRIDE_SCRIPT: &str = include_str!("../files/theme_override_head.html.hbs");
 
 #[derive(Serialize)]
 struct NewContext {}
