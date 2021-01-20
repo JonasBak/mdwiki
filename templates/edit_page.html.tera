@@ -1,49 +1,14 @@
-<!DOCTYPE html>
-<html class="light">
-    <head>
-        <link rel="icon" href="/favicon.svg">
-
-        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
-        <meta name="description" content="Edit {{ file }}">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="theme-color" content="#ffffff" />
-
-        <link rel="stylesheet" href="/css/variables.css">
-        <link rel="stylesheet" href="/css/general.css">
-        <link rel="stylesheet" href="/css/chrome.css">
-
-        <link rel="stylesheet" href="/FontAwesome/css/font-awesome.css">
-    </head>
-    <body>
-        <div class="page-wrapper">
-            <div class="page">
-                <div id="menu-bar-hover-placeholder"></div>
-                <div id="menu-bar" class="menu-bar sticky bordered">
-                    <div class="left-buttons">
-                        <button id="sidebar-toggle" class="icon-button" type="button" title="Go back" aria-label="Go back" onClick="window.history.back()">
-                            <i class="fa fa-chevron-left"></i>
-                        </button>
-                    </div>
-
-                    <h1 class="menu-title">Edit {{ file }}</h1>
-
-                    <div class="right-buttons">
-                    </div>
-                </div>
-                <div id="content" class="content">
-                    <main>
-                        <form method="POST">
-                            <label for="content">
-                                Content:
-                            </label>
-                            <br/>
-                            <textarea id="content" name="content" rows="20" cols="50">{{ content }}</textarea>
-                            <br><br>
-                            <input type="submit" value="Submit">
-                        </form>
-                    </main>
-                </div>
-            </div>
-        <div>
-    </body>
-</html>
+{% extends "base" %}
+{% block title %}Edit {{ file }} - mdwiki{% endblock header %}
+{% block header %}Edit {{ file }}{% endblock header %}
+{% block content %}
+    <form method="POST">
+        <label for="content">
+            Content:
+        </label>
+        <br/>
+        <textarea id="content" name="content" rows="20" cols="50">{{ content }}</textarea>
+        <br><br>
+        <input type="submit" value="Submit">
+    </form>
+{% endblock content %}

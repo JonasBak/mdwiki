@@ -6,6 +6,7 @@ extern crate rocket;
 #[macro_use]
 extern crate log;
 
+use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -511,7 +512,7 @@ impl AppState {
 async fn main() {
     env_logger::init();
 
-    let book_path = "/tmp/mdwiki".into();
+    let book_path = env::var("MDWIKI_PATH").expect("set mdwiki path with the MDWIKI_PATH variable");
 
     let state = AppState {
         book_path,
