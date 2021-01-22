@@ -42,7 +42,7 @@ pub fn new_page_post(form: Form<NewForm>, state: State<'_, AppState>) -> Result<
     {
         let _ = state.dir_lock.lock().unwrap();
 
-        let path = Path::new(&state.book_path).join("src").join(&file);
+        let path = Path::new(&state.config.path).join("src").join(&file);
 
         if let Some(parent) = path.parent() {
             if !parent.is_dir() {
@@ -55,7 +55,7 @@ pub fn new_page_post(form: Form<NewForm>, state: State<'_, AppState>) -> Result<
         let mut ancestors = file.ancestors();
         ancestors.next();
         for dir in ancestors {
-            let index = Path::new(&state.book_path)
+            let index = Path::new(&state.config.path)
                 .join("src")
                 .join(&dir)
                 .join("README.md");
@@ -113,7 +113,7 @@ pub fn edit_page(file: PathBuf, state: State<'_, AppState>) -> Result<Template, 
     if !state.can_edit(&file) {
         return Err(Status::NotFound);
     }
-    let path = Path::new(&state.book_path).join("src").join(&file);
+    let path = Path::new(&state.config.path).join("src").join(&file);
     let content = fs::read_to_string(&path)
         .map_err(log_warn)
         .map_err(|_| Status::NotFound)?;
@@ -134,7 +134,7 @@ pub fn edit_page_post(
     {
         let _ = state.dir_lock.lock().unwrap();
 
-        let path = Path::new(&state.book_path).join("src").join(&file);
+        let path = Path::new(&state.config.path).join("src").join(&file);
         fs::write(path, &form.content)
             .map_err(log_warn)
             .map_err(|_| Status::InternalServerError)?;
@@ -175,7 +175,7 @@ pub async fn upload_image(
         return Err(());
     };
 
-    let file_path = Path::new(&state.book_path)
+    let file_path = Path::new(&state.config.path)
         .join("src/images")
         .join(&filename)
         .with_extension(&extension);

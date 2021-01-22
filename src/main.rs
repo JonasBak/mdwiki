@@ -1,5 +1,6 @@
 #![feature(proc_macro_hygiene, decl_macro)]
 
+mod config;
 mod routes;
 mod utils;
 mod wiki;
@@ -14,8 +15,11 @@ use std::env;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use config::Config;
 use wiki::AppState;
 
+use rocket::fairing::AdHoc;
+use rocket::figment::Figment;
 use rocket_contrib::helmet::SpaceHelmet;
 use rocket_contrib::serve::StaticFiles;
 use rocket_contrib::templates::Template;
@@ -23,7 +27,10 @@ use rocket_contrib::templates::Template;
 fn rocket(state: AppState, static_path: &Path) -> rocket::Rocket {
     use routes::*;
 
-    rocket::ignite()
+    let figment = Figment::from(rocket::Config::default()).merge(Config::figment());
+
+    rocket::custom(figment)
+        .attach(AdHoc::config::<Config>())
         .attach(Template::fairing())
         .attach(SpaceHelmet::default())
         .manage(state)
@@ -37,12 +44,7 @@ fn rocket(state: AppState, static_path: &Path) -> rocket::Rocket {
 async fn main() {
     env_logger::init();
 
-    let book_path = env::var("MDWIKI_PATH").expect("set mdwiki path with the MDWIKI_PATH variable");
-
-    let state = AppState {
-        book_path,
-        dir_lock: Arc::new(Mutex::new(())),
-    };
+    let state = AppState::new();
 
     let build_path = state.setup().unwrap();
 

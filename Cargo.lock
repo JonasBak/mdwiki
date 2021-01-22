@@ -500,6 +500,7 @@ checksum = "a3add2ec7727c9584a0ce75ee3c0f54f0ab692c7934450cc3a0287251e3a4f06"
 dependencies = [
  "pear",
  "serde",
+ "serde_yaml",
  "toml",
  "uncased",
  "version_check",
@@ -1212,6 +1213,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "linked-hash-map"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fb9b38af92608140b86b693604b9ffcc5824240a484d1ecd4795bacb2fe88f3"
+
+[[package]]
 name = "lock_api"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1313,6 +1320,7 @@ name = "mdwiki"
 version = "0.1.0"
 dependencies = [
  "env_logger 0.8.2",
+ "figment",
  "git2",
  "log",
  "mdbook",
@@ -2155,6 +2163,18 @@ dependencies = [
  "itoa",
  "serde",
  "url",
+]
+
+[[package]]
+name = "serde_yaml"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "971be8f6e4d4a47163b405a3df70d14359186f9ab0f3a3ec37df144ca1ce089f"
+dependencies = [
+ "dtoa",
+ "linked-hash-map",
+ "serde",
+ "yaml-rust",
 ]
 
 [[package]]
@@ -3059,6 +3079,15 @@ dependencies = [
  "mac",
  "markup5ever",
  "time 0.1.43",
+]
+
+[[package]]
+name = "yaml-rust"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56c1936c4cc7a1c9ab21a1ebb602eb942ba868cbd44a99cb7cdc5892335e1c85"
+dependencies = [
+ "linked-hash-map",
 ]
 
 [[package]]

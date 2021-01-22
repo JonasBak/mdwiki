@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::config::Config;
 use crate::utils::*;
 
 use mdbook::MDBook;
@@ -31,15 +32,21 @@ impl WikiTree {
 }
 
 pub struct AppState {
-    pub book_path: String,
+    pub config: Config,
     pub dir_lock: Arc<Mutex<()>>,
 }
 
 impl AppState {
+    pub fn new() -> AppState {
+        AppState {
+            config: Config::figment().extract().unwrap(),
+            dir_lock: Arc::new(Mutex::new(())),
+        }
+    }
     pub fn setup(&self) -> Result<Box<Path>, String> {
         info!(
             "setting up mdwiki with configuration: book path = {}",
-            self.book_path
+            self.config.path
         );
 
         let (book, _repo) = self.get_book(true)?;
@@ -48,7 +55,7 @@ impl AppState {
         book.build()
             .map_err(|e| format!("failed to build book: {}", e))?;
 
-        let build_path = Path::new(&self.book_path).join(book.config.build.build_dir);
+        let build_path = Path::new(&self.config.path).join(book.config.build.build_dir);
         Ok(build_path.into_boxed_path())
     }
     pub fn on_created(&self, file: &Path) -> Result<(), String> {
@@ -82,45 +89,48 @@ impl AppState {
         Ok(())
     }
     pub fn get_book(&self, init: bool) -> Result<(MDBook, Repository), String> {
-        let book_path = Path::new(&self.book_path);
+        let book_path = Path::new(&self.config.path);
         let book_src_path = book_path.join("src");
-        let repo = match Repository::open(&self.book_path) {
+        let repo = match Repository::open(&self.config.path) {
             Ok(repo) => {
                 info!("using existing git repository");
                 repo
             }
             Err(_) => {
                 if !init {
-                    return Err(format!("could not find git repo at {}", self.book_path));
+                    return Err(format!("could not find git repo at {}", self.config.path));
                 }
                 info!("could not find existing git repository, initializing new");
 
-                Repository::init(&self.book_path)
-                    .map_err(|e| format!("failed to init repo at '{}': {}", self.book_path, e))?
+                Repository::init(&self.config.path)
+                    .map_err(|e| format!("failed to init repo at '{}': {}", self.config.path, e))?
             }
         };
-        let book = match MDBook::load(&self.book_path) {
+        let book = match MDBook::load(&self.config.path) {
             Ok(book) => {
-                info!("using existing mdbook at {}", self.book_path);
+                info!("using existing mdbook at {}", self.config.path);
                 book
             }
             Err(_) => {
                 if !init {
-                    return Err(format!("could not find book at {}", self.book_path));
+                    return Err(format!("could not find book at {}", self.config.path));
                 }
                 info!(
                     "could not find existing mdbook, creating new at {}",
-                    self.book_path
+                    self.config.path
                 );
 
                 if !book_path.is_dir() {
                     fs::create_dir(&book_path).map_err(|e| {
-                        format!("could not create directory '{}': {}", self.book_path, e)
+                        format!("could not create directory '{}': {}", self.config.path, e)
                     })?;
                 }
                 if !book_src_path.is_dir() {
                     fs::create_dir(&book_src_path).map_err(|e| {
-                        format!("could not create directory '{}/src': {}", self.book_path, e)
+                        format!(
+                            "could not create directory '{}/src': {}",
+                            self.config.path, e
+                        )
                     })?;
                 }
                 let book_images_path = book_src_path.join("images");
@@ -128,7 +138,7 @@ impl AppState {
                     fs::create_dir(&book_images_path).map_err(|e| {
                         format!(
                             "could not create directory '{}/src/images': {}",
-                            self.book_path, e
+                            self.config.path, e
                         )
                     })?;
                 }
@@ -142,7 +152,7 @@ impl AppState {
 
                 self.update_summary()?;
 
-                let book = MDBook::load(&self.book_path).unwrap();
+                let book = MDBook::load(&self.config.path).unwrap();
 
                 self.commit(&repo, "Initial mdwiki commit".into())?;
 
@@ -193,8 +203,8 @@ impl AppState {
                 ));
             }
         }
-        let prefix = Path::new(&self.book_path).join("src");
-        visit(&prefix, &Path::new(&self.book_path).join("src")).unwrap()
+        let prefix = Path::new(&self.config.path).join("src");
+        visit(&prefix, &Path::new(&self.config.path).join("src")).unwrap()
     }
     pub fn update_summary(&self) -> Result<(), String> {
         let tree = self.get_wiki_tree();
@@ -253,7 +263,7 @@ impl AppState {
         let mut summary = String::new();
         build_summary(&mut summary, tree);
 
-        let summary_path = Path::new(&self.book_path).join("src/SUMMARY.md");
+        let summary_path = Path::new(&self.config.path).join("src/SUMMARY.md");
         fs::write(summary_path, summary)
             .map_err(|e| format!("could not write summary file: {}", e))?;
 
@@ -306,7 +316,7 @@ impl AppState {
             return false;
         }
 
-        let full_path = Path::new(&self.book_path).join("src").join(&path);
+        let full_path = Path::new(&self.config.path).join("src").join(&path);
 
         if !full_path.is_file() {
             return false;
@@ -324,7 +334,7 @@ impl AppState {
             return false;
         }
 
-        let full_path = Path::new(&self.book_path).join("src").join(&path);
+        let full_path = Path::new(&self.config.path).join("src").join(&path);
 
         if full_path.is_file() {
             return false;
