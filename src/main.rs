@@ -12,7 +12,8 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use rocket::http::Status;
+use rocket::data::{Data, ToByteUnit};
+use rocket::http::{ContentType, Status};
 use rocket::request::Form;
 use rocket::response::Redirect;
 use rocket::State;
@@ -26,13 +27,15 @@ use git2::{IndexAddOption, Repository};
 
 use serde::Serialize;
 
+use rand::Rng;
+
 fn log_warn<T: std::fmt::Display>(err: T) -> T {
     warn!("{}", err);
     err
 }
 
 const RESERVED_NAMES: &[&str] = &["SUMMARY.md", "index.md"];
-const RESERVED_PREFIXES: &[&str] = &["new", "edit"];
+const RESERVED_PREFIXES: &[&str] = &["new", "edit", "upload"];
 
 fn is_reserved_name(path: &Path) -> bool {
     RESERVED_NAMES
@@ -52,6 +55,19 @@ fn path_is_simple(path: &Path) -> bool {
             _ => true,
         })
         .is_none()
+}
+
+fn rand_safe_string(length: usize) -> String {
+    const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
+
+    let mut rng = rand::thread_rng();
+
+    (0..length)
+        .map(|_| {
+            let idx = rng.gen_range(0..CHARSET.len());
+            CHARSET[idx] as char
+        })
+        .collect()
 }
 
 const SUMMARY_HEAD: &str = include_str!("../files/summary_head.md");
@@ -202,6 +218,28 @@ fn edit_page_post(
     )));
 }
 
+#[post("/image", data = "<data>")]
+async fn upload_image(
+    data: Data,
+    // contentType: ContentType, TODO fix extension
+    state: State<'_, AppState>,
+) -> Result<String, ()> {
+    let filename = rand_safe_string(16);
+    let extension = "jpg";
+    let file_path = Path::new(&state.book_path)
+        .join("src/images")
+        .join(&filename)
+        .with_extension(&extension);
+
+    data.open(8_u8.mebibytes())
+        .stream_to_file(file_path)
+        .await
+        .map_err(log_warn)
+        .map_err(|_| ())?;
+
+    Ok(format!("/images/{}.{}", filename, extension))
+}
+
 enum WikiTree {
     File(Box<Path>),
     Directory(Box<Path>, Vec<WikiTree>),
@@ -307,6 +345,15 @@ impl AppState {
                 if !book_src_path.is_dir() {
                     fs::create_dir(&book_src_path).map_err(|e| {
                         format!("could not create directory '{}/src': {}", self.book_path, e)
+                    })?;
+                }
+                let book_images_path = book_src_path.join("images");
+                if !book_images_path.is_dir() {
+                    fs::create_dir(&book_images_path).map_err(|e| {
+                        format!(
+                            "could not create directory '{}/src/images': {}",
+                            self.book_path, e
+                        )
                     })?;
                 }
 
@@ -514,6 +561,7 @@ fn rocket(state: AppState, static_path: &Path) -> rocket::Rocket {
         .manage(state)
         .mount("/new", routes![new_page, new_page_post])
         .mount("/edit", routes![edit_page, edit_page_post])
+        .mount("/upload", routes![upload_image,])
         .mount("/", StaticFiles::from(static_path))
 }
 

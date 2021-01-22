@@ -30,6 +30,8 @@
                 padding: 5px 10px;
             }
         </style>
+
+        {% block extra_head %}{% endblock extra_head %}
     </head>
     <body>
         <div class="page-wrapper">
@@ -53,6 +55,6 @@
                     </main>
                 </div>
             </div>
-        <div>
+        </div>
     </body>
 </html>

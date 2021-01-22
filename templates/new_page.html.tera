@@ -1,5 +1,8 @@
 {% extends "base" %}
 {% block title %}New page - mdwiki{% endblock header %}
+{% block extra_head %}
+    {% include "upload_image" %}
+{% endblock extra_head %}
 {% block header %}New page{% endblock header %}
 {% block content %}
     <form method="POST">
@@ -12,6 +15,15 @@
         <label for="content">
             Content:
         </label>
+        <br/>
+        <div id="image-upload-container"></div>
+        <button
+            id="upload-button"
+            type="button"
+            onclick="showUploadContainer('image-upload-container', insertImageTagCallback('file-content'))"
+            >
+            <i class="fa fa-file-upload"></i> Upload image
+        </button>
         <br/>
         <textarea id="file-content" name="content"></textarea>
         <br><br>

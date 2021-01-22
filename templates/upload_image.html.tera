@@ -1,0 +1,50 @@
+<script type="text/javascript">
+    function showUploadContainer(containerId, callback) {
+        const uploadContainer = document.getElementById(containerId);
+
+        uploadContainer.innerHTML = `
+            <form>
+                <input type="file">
+            </form>
+        `;
+
+        function onImageSelected(e) {
+            if (!e || !e.target || !e.target.files || e.target.files.length === 0) {
+                return
+            }
+
+            const file = e.target.files[0];
+
+            fetch("/upload/image", {
+                method: "POST",
+                headers: {
+                    'Content-Type': file.type
+                },
+                body: file,
+            }).then((resp) => {
+                uploadContainer.innerHTML = "";
+                if (!resp.ok) {
+                    throw new Error();
+                }
+                return resp.text();
+            }).then((link) => {
+                callback(link);
+            });
+        }
+
+        uploadContainer.onchange = onImageSelected;
+    }
+
+    function insertImageTagCallback(textareaId) {
+        return (imageUrl) => {
+            const textarea = document.getElementById(textareaId);
+
+            const i = textarea.selectionStart;
+
+            const content = textarea.value;
+            const imageTag = `![insert image description](${imageUrl})`;
+
+            textarea.value = content.slice(0, i) + imageTag + content.slice(i);
+        }
+    }
+</script>
