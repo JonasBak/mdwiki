@@ -5,6 +5,7 @@
 {% endblock extra_head %}
 {% block header %}New page{% endblock header %}
 {% block content %}
+    <div id="image-upload-container"></div>
     <form method="POST">
         <label for="file">
             Filename:
@@ -16,18 +17,18 @@
             Content:
         </label>
         <br/>
-        <div id="image-upload-container"></div>
+        <textarea id="file-content" name="content"></textarea>
+        <br/>
         <button
             id="upload-button"
             type="button"
+            class="form-button"
             onclick="showUploadContainer('image-upload-container', insertImageTagCallback('file-content'))"
             >
-            <i class="fa fa-file-upload"></i> Upload image
+            <i class="fa fa-image"></i> Upload image
         </button>
-        <br/>
-        <textarea id="file-content" name="content"></textarea>
         <br><br>
-        <button id="submit-button" type="submit">
+        <button class="form-button" type="submit">
             <i class="fa fa-save"></i> Create page
         </button>
     </form>

@@ -1,11 +1,33 @@
+<style type="text/css">
+    #upload-modal-container {
+        position: absolute;
+        z-index: 999;
+        top: 0px;
+        left: 0px;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    #upload-modal {
+        background-color: white;
+        border: 1px solid black;
+        padding: 20px;
+    }
+</style>
 <script type="text/javascript">
     function showUploadContainer(containerId, callback) {
         const uploadContainer = document.getElementById(containerId);
 
         uploadContainer.innerHTML = `
-            <form>
-                <input type="file">
-            </form>
+            <div id="upload-modal-container">
+                <div id="upload-modal">
+                    <form>
+                        <input type="file">
+                    </form>
+                </div>
+            </div>
         `;
 
         function onImageSelected(e) {
@@ -33,6 +55,13 @@
         }
 
         uploadContainer.onchange = onImageSelected;
+
+        document.getElementById("upload-modal-container").onclick = (e) => {
+            uploadContainer.innerHTML = "";
+        };
+        document.getElementById("upload-modal").onclick = (e) => {
+            e.stopPropagation();
+        };
     }
 
     function insertImageTagCallback(textareaId) {

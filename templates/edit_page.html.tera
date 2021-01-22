@@ -1,15 +1,28 @@
 {% extends "base" %}
 {% block title %}Edit {{ file }} - mdwiki{% endblock header %}
+{% block extra_head %}
+    {% include "upload_image" %}
+{% endblock extra_head %}
 {% block header %}Edit {{ file }}{% endblock header %}
 {% block content %}
+    <div id="image-upload-container"></div>
     <form method="POST">
         <label for="content">
             Content:
         </label>
         <br/>
         <textarea id="file-content" name="content">{{ content }}</textarea>
+        <br/>
+        <button
+            id="upload-button"
+            type="button"
+            class="form-button"
+            onclick="showUploadContainer('image-upload-container', insertImageTagCallback('file-content'))"
+            >
+            <i class="fa fa-image"></i> Upload image
+        </button>
         <br><br>
-        <button id="submit-button" type="submit">
+        <button class="form-button" type="submit">
             <i class="fa fa-save"></i> Save page
         </button>
     </form>

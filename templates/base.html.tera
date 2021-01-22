@@ -21,7 +21,7 @@
                 width: 100%;
                 min-height: 30em;
             }
-            #submit-button {
+            .form-button {
                 background: none;
                 border: none;
                 cursor: pointer;

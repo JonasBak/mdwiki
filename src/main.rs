@@ -35,7 +35,7 @@ fn log_warn<T: std::fmt::Display>(err: T) -> T {
 }
 
 const RESERVED_NAMES: &[&str] = &["SUMMARY.md", "index.md"];
-const RESERVED_PREFIXES: &[&str] = &["new", "edit", "upload"];
+const RESERVED_PREFIXES: &[&str] = &["new", "edit", "upload", "images"];
 
 fn is_reserved_name(path: &Path) -> bool {
     RESERVED_NAMES
@@ -96,7 +96,8 @@ fn new_page() -> Template {
 #[post("/", data = "<form>")]
 fn new_page_post(form: Form<NewForm>, state: State<'_, AppState>) -> Result<Redirect, Status> {
     // TODO check for legal characters in path
-    let file = Path::new(&form.file);
+    let form_file = form.file.replace(" ", "_");
+    let file = Path::new(&form_file);
     if !state.can_create(&file) {
         return Err(Status::BadRequest);
     }
@@ -221,11 +222,22 @@ fn edit_page_post(
 #[post("/image", data = "<data>")]
 async fn upload_image(
     data: Data,
-    // contentType: ContentType, TODO fix extension
+    content_type: &ContentType,
     state: State<'_, AppState>,
 ) -> Result<String, ()> {
     let filename = rand_safe_string(16);
-    let extension = "jpg";
+    let extension = if *content_type == ContentType::JPEG {
+        "jpg"
+    } else if *content_type == ContentType::GIF {
+        "gif"
+    } else if *content_type == ContentType::PNG {
+        "png"
+    } else if *content_type == ContentType::BMP {
+        "bmp"
+    } else {
+        return Err(());
+    };
+
     let file_path = Path::new(&state.book_path)
         .join("src/images")
         .join(&filename)
@@ -390,6 +402,9 @@ impl AppState {
         fn visit(prefix: &Path, path: &Path) -> Option<WikiTree> {
             let relative_path = path.strip_prefix(&prefix).unwrap();
             if path.is_dir() {
+                if path.starts_with("images") {
+                    return None;
+                }
                 let mut children = fs::read_dir(path)
                     .unwrap()
                     .into_iter()
