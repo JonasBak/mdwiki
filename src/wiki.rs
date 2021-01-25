@@ -17,13 +17,14 @@ const MDWIKI_README: &str = include_str!("../files/default_README.md");
 const MDWIKI_BOOK_TOML: &str = include_str!("../files/default_book.toml");
 const MDWIKI_GITIGNORE: &str = include_str!("../files/default_gitignore");
 
-enum WikiTree {
+#[derive(Debug)]
+pub enum WikiTree {
     File(Box<Path>),
     Directory(Box<Path>, Vec<WikiTree>),
 }
 
 impl WikiTree {
-    fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         match self {
             WikiTree::File(path) => &path,
             WikiTree::Directory(path, _) => &path,
@@ -172,7 +173,7 @@ impl AppState {
         }
         Ok((book, repo))
     }
-    fn get_wiki_tree(&self) -> WikiTree {
+    pub fn get_wiki_tree(&self) -> WikiTree {
         fn visit(prefix: &Path, path: &Path) -> Option<WikiTree> {
             let relative_path = path.strip_prefix(&prefix).unwrap();
             if path.is_dir() {

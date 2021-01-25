@@ -498,9 +498,11 @@ version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3add2ec7727c9584a0ce75ee3c0f54f0ab692c7934450cc3a0287251e3a4f06"
 dependencies = [
+ "parking_lot",
  "pear",
  "serde",
  "serde_yaml",
+ "tempfile",
  "toml",
  "uncased",
  "version_check",

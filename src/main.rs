@@ -59,19 +59,27 @@ mod test {
     use rocket::http::{ContentType, Status};
     use rocket::local::blocking::Client;
 
-    fn get_rocket_instance(test_id: &'static str) -> (rocket::Rocket, Box<Path>) {
+    use figment::Jail;
+
+    const TEST_CONFIG: &str = r#"
+[debug]
+secret_key = "DEBUGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG"
+
+[[debug.users]]
+username = "user"
+password = "password"
+"#;
+
+    fn get_rocket_instance(jail: &mut Jail) -> (rocket::Rocket, Box<Path>) {
         use super::*;
 
-        let book_path = Path::new("./target/tests").join(format!("mdwiki_{}", test_id));
+        let book_path = jail.directory().join("mdwiki-test-dir");
 
-        if book_path.is_dir() {
-            std::fs::remove_dir_all(&book_path).unwrap();
-        }
+        jail.create_file("mdwiki.toml", TEST_CONFIG).unwrap();
 
-        let state = AppState {
-            book_path: book_path.to_str().unwrap().to_string(),
-            dir_lock: Arc::new(Mutex::new(())),
-        };
+        jail.set_env("MDWIKI_PATH", book_path.to_str().unwrap());
+
+        let state = AppState::new();
 
         let build_path = state.setup().unwrap();
 
@@ -80,99 +88,144 @@ mod test {
 
     #[test]
     fn bootstrap_wiki() {
-        let (rocket, _book_path) = get_rocket_instance("bootstrap");
+        Jail::expect_with(|jail| {
+            let (rocket, _book_path) = get_rocket_instance(jail);
 
-        let client = Client::tracked(rocket).expect("valid rocket instance");
+            let client = Client::tracked(rocket).expect("valid rocket instance");
 
-        assert_eq!(client.get("/index.html").dispatch().status(), Status::Ok);
-        assert_eq!(client.get("/SUMMARY.html").dispatch().status(), Status::Ok);
-        assert_eq!(client.get("/new").dispatch().status(), Status::Ok);
-        assert_eq!(
-            client.get("/edit/README.md").dispatch().status(),
-            Status::Ok
-        );
-        assert_eq!(
-            client.get("/edit/chapter_1.md").dispatch().status(),
-            Status::NotFound
-        );
+            assert_eq!(client.get("/index.html").dispatch().status(), Status::Ok);
+            assert_eq!(client.get("/SUMMARY.html").dispatch().status(), Status::Ok);
 
-        let response = client.get("/").dispatch();
-        assert_eq!(response.status(), Status::Ok);
-        assert!(response
-            .into_string()
-            .unwrap()
-            .contains(r#"// mdwiki theme override script to add "edit" and "new" buttons"#));
+            let response = client.get("/").dispatch();
+            assert_eq!(response.status(), Status::Ok);
+            assert!(response
+                .into_string()
+                .unwrap()
+                .contains(r#"// mdwiki theme override script to add "edit" and "new" buttons"#));
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn login() {
+        Jail::expect_with(|jail| {
+            let (rocket, _book_path) = get_rocket_instance(jail);
+
+            let client = Client::tracked(rocket).expect("valid rocket instance");
+
+            let response = client
+                .post("/login")
+                .header(ContentType::Form)
+                .body("username=user&password=password")
+                .dispatch();
+
+            assert_eq!(response.status(), Status::SeeOther);
+            assert_eq!(response.headers().get_one("location"), Some("/"));
+
+            Ok(())
+        });
     }
 
     #[test]
     fn new_page() {
-        let (rocket, _book_path) = get_rocket_instance("new_page");
+        Jail::expect_with(|jail| {
+            let (rocket, _book_path) = get_rocket_instance(jail);
 
-        let client = Client::tracked(rocket).expect("valid rocket instance");
+            let client = Client::tracked(rocket).expect("valid rocket instance");
 
-        let response = client
-            .post("/new")
-            .header(ContentType::Form)
-            .body("file=newfile.md&content=NEWPAGE")
-            .dispatch();
+            client
+                .post("/login")
+                .header(ContentType::Form)
+                .body("username=user&password=password")
+                .dispatch();
 
-        assert_eq!(response.status(), Status::SeeOther);
-        assert_eq!(
-            response.headers().get_one("location"),
-            Some("/newfile.html")
-        );
+            let response = client
+                .post("/new")
+                .header(ContentType::Form)
+                .body("file=newfile.md&content=NEWPAGE")
+                .dispatch();
 
-        let response = client.get("/newfile.html").dispatch();
-        assert_eq!(response.status(), Status::Ok);
-        assert!(response.into_string().unwrap().contains("NEWPAGE"));
+            assert_eq!(response.status(), Status::SeeOther);
+            assert_eq!(
+                response.headers().get_one("location"),
+                Some("/newfile.html")
+            );
+
+            let response = client.get("/newfile.html").dispatch();
+            assert_eq!(response.status(), Status::Ok);
+            assert!(response.into_string().unwrap().contains("NEWPAGE"));
+
+            Ok(())
+        });
     }
 
     #[test]
     fn new_page_with_dirs() {
-        let (rocket, _book_path) = get_rocket_instance("new_page_with_dirs");
+        Jail::expect_with(|jail| {
+            let (rocket, _book_path) = get_rocket_instance(jail);
 
-        let client = Client::tracked(rocket).expect("valid rocket instance");
+            let client = Client::tracked(rocket).expect("valid rocket instance");
 
-        let response = client
-            .post("/new")
-            .header(ContentType::Form)
-            .body("file=newdir/newfile.md&content=NEWPAGE")
-            .dispatch();
+            client
+                .post("/login")
+                .header(ContentType::Form)
+                .body("username=user&password=password")
+                .dispatch();
 
-        assert_eq!(response.status(), Status::SeeOther);
-        assert_eq!(
-            response.headers().get_one("location"),
-            Some("/newdir/newfile.html")
-        );
+            let response = client
+                .post("/new")
+                .header(ContentType::Form)
+                .body("file=newdir/newfile.md&content=NEWPAGE")
+                .dispatch();
 
-        assert_eq!(client.get("/newdir/").dispatch().status(), Status::Ok);
-        assert_eq!(
-            client.get("/newdir/index.html").dispatch().status(),
-            Status::Ok
-        );
-        assert_eq!(
-            client.get("/newdir/newfile.html").dispatch().status(),
-            Status::Ok
-        );
+            assert_eq!(response.status(), Status::SeeOther);
+            assert_eq!(
+                response.headers().get_one("location"),
+                Some("/newdir/newfile.html")
+            );
+
+            assert_eq!(client.get("/newdir/").dispatch().status(), Status::Ok);
+            assert_eq!(
+                client.get("/newdir/index.html").dispatch().status(),
+                Status::Ok
+            );
+            assert_eq!(
+                client.get("/newdir/newfile.html").dispatch().status(),
+                Status::Ok
+            );
+
+            Ok(())
+        })
     }
 
     #[test]
     fn edit_page() {
-        let (rocket, _book_path) = get_rocket_instance("edit_page");
+        Jail::expect_with(|jail| {
+            let (rocket, _book_path) = get_rocket_instance(jail);
 
-        let client = Client::tracked(rocket).expect("valid rocket instance");
+            let client = Client::tracked(rocket).expect("valid rocket instance");
 
-        let response = client
-            .post("/edit/README.md")
-            .header(ContentType::Form)
-            .body("content=EDITEDCONTENT")
-            .dispatch();
+            client
+                .post("/login")
+                .header(ContentType::Form)
+                .body("username=user&password=password")
+                .dispatch();
 
-        assert_eq!(response.status(), Status::SeeOther);
-        assert_eq!(response.headers().get_one("location"), Some("/"));
+            let response = client
+                .post("/edit/README.md")
+                .header(ContentType::Form)
+                .body("content=EDITEDCONTENT")
+                .dispatch();
 
-        let response = client.get("/index.html").dispatch();
-        assert_eq!(response.status(), Status::Ok);
-        assert!(response.into_string().unwrap().contains("EDITEDCONTENT"));
+            assert_eq!(response.status(), Status::SeeOther);
+            assert_eq!(response.headers().get_one("location"), Some("/"));
+
+            let response = client.get("/index.html").dispatch();
+            assert_eq!(response.status(), Status::Ok);
+            assert!(response.into_string().unwrap().contains("EDITEDCONTENT"));
+
+            Ok(())
+        })
     }
 }
