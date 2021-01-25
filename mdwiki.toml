@@ -1,2 +1,6 @@
 [debug]
 secret_key = "DEBUGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG"
+
+[[debug.users]]
+username = "user"
+password = "password"

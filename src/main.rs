@@ -11,9 +11,7 @@ extern crate rocket;
 #[macro_use]
 extern crate log;
 
-use std::env;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 
 use config::Config;
 use wiki::AppState;
@@ -37,12 +35,14 @@ fn rocket(state: AppState, static_path: &Path) -> rocket::Rocket {
         .mount("/new", routes![new_page, new_page_post])
         .mount("/edit", routes![edit_page, edit_page_post])
         .mount("/upload", routes![upload_image,])
+        .mount("/login", routes![login, login_post])
+        .mount("/logout", routes![logout,])
         .mount("/", StaticFiles::from(static_path))
 }
 
 #[rocket::main]
 async fn main() {
-    env_logger::init();
+    env_logger::init_from_env("LOG_LEVEL");
 
     let state = AppState::new();
 

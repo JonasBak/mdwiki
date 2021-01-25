@@ -1,0 +1,31 @@
+{% extends "base" %}
+{% block title %}Login - mdwiki{% endblock header %}
+{% block extra_head %}
+{% endblock extra_head %}
+{% block header %}Login{% endblock header %}
+{% block content %}
+    {% if status_message is string %}
+        {{ status_message }}
+    {% endif %}
+    {% if user is string %}
+        You are already logged in as {{ user }}
+    {% else %}
+        <form method="POST">
+            <label for="username">
+                Username:
+            </label>
+            <br/>
+            <input id="username" name="username"/>
+            <br/>
+            <label for="password">
+                Password:
+            </label>
+            <br/>
+            <input id="password" name="password" type="password"/>
+            <br><br>
+            <button class="form-button" type="submit">
+                <i class="fa fa-user-circle"></i> Login
+            </button>
+        </form>
+    {% endif %}
+{% endblock content %}

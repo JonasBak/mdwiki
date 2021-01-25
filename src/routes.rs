@@ -2,18 +2,104 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::config::{Config, User};
 use crate::utils::*;
 use crate::wiki::AppState;
 
 use rocket::data::{Data, ToByteUnit};
-use rocket::http::{ContentType, Status};
-use rocket::request::Form;
-use rocket::response::Redirect;
+use rocket::http::{ContentType, Cookie, CookieJar, Status};
+use rocket::request::{self, FlashMessage, Form, FromRequest, Request};
+use rocket::response::{Flash, Redirect};
 use rocket::State;
 
 use rocket_contrib::templates::Template;
 
 use serde::Serialize;
+
+const MDWIKI_AUTH_COOKIE: &str = "mdwiki_auth";
+
+#[rocket::async_trait]
+impl<'a, 'r> FromRequest<'a, 'r> for User {
+    type Error = ();
+
+    async fn from_request(req: &'a Request<'r>) -> request::Outcome<Self, Self::Error> {
+        let username_cookie = if let Some(username) = req.cookies().get_private(MDWIKI_AUTH_COOKIE)
+        {
+            username
+        } else {
+            return request::Outcome::Forward(());
+        };
+
+        let user = if let Some(user) = try_outcome!(req.guard::<State<'r, Config>>().await)
+            .users
+            .iter()
+            .find(|user| user.username == username_cookie.value())
+        {
+            user.clone()
+        } else {
+            return request::Outcome::Failure((Status::BadRequest, ()));
+        };
+
+        request::Outcome::Success(user)
+    }
+}
+
+#[derive(Serialize)]
+struct LoginContext {
+    status_message: Option<String>,
+    user: Option<String>,
+}
+
+#[derive(FromForm)]
+pub struct LoginForm {
+    username: String,
+    password: String,
+}
+
+#[get("/")]
+pub fn login(flash: Option<FlashMessage>, user: Option<User>) -> Template {
+    let context = LoginContext {
+        status_message: flash.map(|f| f.msg().to_string()),
+        user: user.map(|user| user.username),
+    };
+    Template::render("login", &context)
+}
+
+#[post("/", data = "<form>")]
+pub fn login_post(
+    form: Form<LoginForm>,
+    config: State<'_, Config>,
+    cookies: &CookieJar<'_>,
+) -> Result<Redirect, Flash<Redirect>> {
+    let user = if let Some(user) = config
+        .users
+        .iter()
+        .find(|user| user.username == form.username)
+    {
+        user
+    } else {
+        return Err(Flash::error(
+            Redirect::to("/login"),
+            "Invalid username/password.",
+        ));
+    };
+    if user.password == form.password {
+        let mut cookie = Cookie::new(MDWIKI_AUTH_COOKIE, user.username.clone());
+        cookie.set_http_only(false);
+        cookies.add_private(cookie);
+        return Ok(Redirect::to("/"));
+    }
+    Err(Flash::error(
+        Redirect::to("/login"),
+        "Invalid username/password.",
+    ))
+}
+
+#[get("/")]
+pub fn logout(cookies: &CookieJar<'_>) -> Redirect {
+    cookies.remove_private(Cookie::named(MDWIKI_AUTH_COOKIE));
+    Redirect::to("/")
+}
 
 #[derive(Serialize)]
 struct NewContext {}

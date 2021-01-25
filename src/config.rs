@@ -4,15 +4,23 @@ use figment::providers::{Env, Format, Toml};
 use figment::value::{Dict, Map};
 use figment::{Error, Figment, Metadata, Profile, Provider};
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct User {
+    pub username: String,
+    pub password: String,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     pub path: String,
+    pub users: Vec<User>,
 }
 
 impl Default for Config {
     fn default() -> Config {
         Config {
             path: "./mdwiki".into(),
+            users: Vec::new(),
         }
     }
 }
