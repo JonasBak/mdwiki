@@ -1324,6 +1324,7 @@ dependencies = [
  "git2",
  "log",
  "mdbook",
+ "once_cell",
  "rand 0.8.2",
  "rocket",
  "rocket_contrib",

@@ -1,8 +1,15 @@
 use serde::{Deserialize, Serialize};
 
+use once_cell::sync::Lazy;
+
 use figment::providers::{Env, Format, Toml};
 use figment::value::{Dict, Map};
 use figment::{Error, Figment, Metadata, Profile, Provider};
+
+pub const MDWIKI_USER: Lazy<User> = Lazy::new(|| User {
+    username: String::from("mdwiki"),
+    password: "".into(),
+});
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct User {

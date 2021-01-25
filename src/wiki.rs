@@ -2,12 +2,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::config::Config;
+use crate::config::{Config, User, MDWIKI_USER};
 use crate::utils::*;
 
 use mdbook::MDBook;
 
-use git2::{IndexAddOption, Repository};
+use git2::{IndexAddOption, Repository, Signature};
 
 const SUMMARY_HEAD: &str = include_str!("../files/summary_head.md");
 
@@ -58,7 +58,7 @@ impl AppState {
         let build_path = Path::new(&self.config.path).join(book.config.build.build_dir);
         Ok(build_path.into_boxed_path())
     }
-    pub fn on_created(&self, file: &Path) -> Result<(), String> {
+    pub fn on_created(&self, user: &User, file: &Path) -> Result<(), String> {
         info!("running post-create hooks for {}", file.to_string_lossy());
 
         info!("updating summary");
@@ -67,7 +67,7 @@ impl AppState {
         let (book, repo) = self.get_book(false)?;
 
         info!("committing {}", file.to_string_lossy());
-        self.commit(&repo, format!("Create {}", file.to_string_lossy()))?;
+        self.commit(&repo, user, format!("Create {}", file.to_string_lossy()))?;
 
         info!("rebuilding book");
         book.build()
@@ -75,12 +75,12 @@ impl AppState {
 
         Ok(())
     }
-    pub fn on_edited(&self, file: &PathBuf) -> Result<(), String> {
+    pub fn on_edited(&self, user: &User, file: &PathBuf) -> Result<(), String> {
         info!("running post-edit hooks for {}", file.to_string_lossy());
         let (book, repo) = self.get_book(false)?;
 
         info!("committing changes to {}", file.to_string_lossy());
-        self.commit(&repo, format!("Edit {}", file.to_string_lossy()))?;
+        self.commit(&repo, user, format!("Edit {}", file.to_string_lossy()))?;
 
         info!("rebuilding book");
         book.build()
@@ -154,7 +154,7 @@ impl AppState {
 
                 let book = MDBook::load(&self.config.path).unwrap();
 
-                self.commit(&repo, "Initial mdwiki commit".into())?;
+                self.commit(&repo, &MDWIKI_USER, "Initial mdwiki commit".into())?;
 
                 book
             }
@@ -269,7 +269,12 @@ impl AppState {
 
         Ok(())
     }
-    pub fn commit(&self, repo: &Repository, commit_message: String) -> Result<(), String> {
+    pub fn commit(
+        &self,
+        repo: &Repository,
+        user: &User,
+        commit_message: String,
+    ) -> Result<(), String> {
         let mut index = repo
             .index()
             .map_err(|e| format!("failed to get the index file: {}", e))?;
@@ -284,8 +289,7 @@ impl AppState {
             .map_err(|e| format!("failed to write tree: {}", e))?;
 
         {
-            let sig = repo
-                .signature()
+            let sig = Signature::now(&user.username, "mdwiki@example.com")
                 .map_err(|e| format!("failed to get signature: {}", e))?;
             let tree = repo
                 .find_tree(tree_id)

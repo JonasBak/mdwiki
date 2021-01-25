@@ -1,26 +1,6 @@
 <script type="text/javascript">
-    // mdwiki theme override script to add "edit" and "new" buttons
-    window.addEventListener("load", function() {
-        const buttonDiv = document.getElementsByClassName("right-buttons")[0];
-
-        editLink = document.createElement("a");
-        editLink.href = "/edit/{{ path }}".replace(/index.md$/, "README.md");
-        editLink.title = "Edit this page";
-
-        editIcon = document.createElement("i");
-        editIcon.className = "fa fa-edit";
-
-        editLink.appendChild(editIcon);
-        buttonDiv.appendChild(editLink);
-
-        newLink = document.createElement("a");
-        newLink.href = "/new";
-        newLink.title = "Create new page";
-
-        newIcon = document.createElement("i");
-        newIcon.className = "fa fa-plus";
-
-        newLink.appendChild(newIcon);
-        buttonDiv.appendChild(newLink);
-    });
+    const mdwiki_file_path = "{{ path }}";
+</script>
+<script type="text/javascript" src="/mdwiki_script.js">
+// mdwiki theme override script to add "edit" and "new" buttons
 </script>

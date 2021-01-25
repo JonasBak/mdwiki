@@ -102,6 +102,19 @@ pub fn logout(cookies: &CookieJar<'_>) -> Redirect {
 }
 
 #[derive(Serialize)]
+struct ScriptContext {
+    logged_in: bool,
+}
+
+#[get("/")]
+pub fn mdwiki_script(user: Option<User>) -> Template {
+    let context = ScriptContext {
+        logged_in: user.is_some(),
+    };
+    Template::render("mdwiki_script", &context)
+}
+
+#[derive(Serialize)]
 struct NewContext {}
 
 #[derive(FromForm)]
@@ -111,13 +124,17 @@ pub struct NewForm {
 }
 
 #[get("/")]
-pub fn new_page() -> Template {
+pub fn new_page(_user: User) -> Template {
     let context = NewContext {};
     Template::render("new_page", &context)
 }
 
 #[post("/", data = "<form>")]
-pub fn new_page_post(form: Form<NewForm>, state: State<'_, AppState>) -> Result<Redirect, Status> {
+pub fn new_page_post(
+    form: Form<NewForm>,
+    user: User,
+    state: State<'_, AppState>,
+) -> Result<Redirect, Status> {
     // TODO check for legal characters in path
     let form_file = form.file.replace(" ", "_");
     let file = Path::new(&form_file);
@@ -167,7 +184,7 @@ pub fn new_page_post(form: Form<NewForm>, state: State<'_, AppState>) -> Result<
             .map_err(|_| Status::InternalServerError)?;
 
         state
-            .on_created(&file)
+            .on_created(&user, &file)
             .map_err(log_warn)
             .map_err(|_| Status::InternalServerError)?;
     }
@@ -195,7 +212,11 @@ pub struct EditForm {
 }
 
 #[get("/<file..>")]
-pub fn edit_page(file: PathBuf, state: State<'_, AppState>) -> Result<Template, Status> {
+pub fn edit_page(
+    file: PathBuf,
+    _user: User,
+    state: State<'_, AppState>,
+) -> Result<Template, Status> {
     if !state.can_edit(&file) {
         return Err(Status::NotFound);
     }
@@ -211,6 +232,7 @@ pub fn edit_page(file: PathBuf, state: State<'_, AppState>) -> Result<Template, 
 pub fn edit_page_post(
     file: PathBuf,
     form: Form<EditForm>,
+    user: User,
     state: State<'_, AppState>,
 ) -> Result<Redirect, Status> {
     if !state.can_edit(&file) {
@@ -226,7 +248,7 @@ pub fn edit_page_post(
             .map_err(|_| Status::InternalServerError)?;
 
         state
-            .on_edited(&file)
+            .on_edited(&user, &file)
             .map_err(log_warn)
             .map_err(|_| Status::InternalServerError)?;
     }
@@ -245,6 +267,7 @@ pub fn edit_page_post(
 #[post("/image", data = "<data>")]
 pub async fn upload_image(
     data: Data,
+    _user: User,
     content_type: &ContentType,
     state: State<'_, AppState>,
 ) -> Result<String, ()> {

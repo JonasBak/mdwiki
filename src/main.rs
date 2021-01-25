@@ -37,6 +37,7 @@ fn rocket(state: AppState, static_path: &Path) -> rocket::Rocket {
         .mount("/upload", routes![upload_image,])
         .mount("/login", routes![login, login_post])
         .mount("/logout", routes![logout,])
+        .mount("/mdwiki_script.js", routes![mdwiki_script,])
         .mount("/", StaticFiles::from(static_path))
 }
 

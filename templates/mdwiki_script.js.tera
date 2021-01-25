@@ -1,0 +1,49 @@
+window.addEventListener("load", function() {
+    const buttonDiv = document.getElementsByClassName("right-buttons")[0];
+
+    {% if logged_in %}
+
+        const editLink = document.createElement("a");
+        editLink.href = `/edit/${mdwiki_file_path}`.replace(/index.md$/, "README.md");
+        editLink.title = "Edit this page";
+
+        const editIcon = document.createElement("i");
+        editIcon.className = "fa fa-edit";
+
+        editLink.appendChild(editIcon);
+        buttonDiv.appendChild(editLink);
+
+        const newLink = document.createElement("a");
+        newLink.href = "/new";
+        newLink.title = "Create new page";
+
+        const newIcon = document.createElement("i");
+        newIcon.className = "fa fa-plus";
+
+        newLink.appendChild(newIcon);
+        buttonDiv.appendChild(newLink);
+
+        const logoutLink = document.createElement("a");
+        logoutLink.href = "/logout";
+        logoutLink.title = "Logout";
+
+        const logoutIcon = document.createElement("i");
+        logoutIcon.className = "fa fa-times-circle";
+
+        logoutLink.appendChild(logoutIcon);
+        buttonDiv.appendChild(logoutLink);
+
+    {% else %}
+
+        const loginLink = document.createElement("a");
+        loginLink.href = "/login";
+        loginLink.title = "Login";
+
+        const loginIcon = document.createElement("i");
+        loginIcon.className = "fa fa-user-circle";
+
+        loginLink.appendChild(loginIcon);
+        buttonDiv.appendChild(loginLink);
+
+    {% endif %}
+});
