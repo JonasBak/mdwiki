@@ -1,4 +1,4 @@
-use std::path::{Component, Path};
+use async_std::path::{Component, Path};
 
 use rand::Rng;
 

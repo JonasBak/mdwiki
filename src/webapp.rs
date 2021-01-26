@@ -1,15 +1,15 @@
-use std::ffi::OsStr;
-use std::fs;
-use std::path::{Path, PathBuf};
-
 use crate::config::{Config, User};
 use crate::utils::*;
-use crate::wiki::AppState;
+use crate::wiki::WikiRequest;
+
+use async_std::fs;
+use async_std::path::{Path, PathBuf};
 
 use rocket::data::{Data, ToByteUnit};
 use rocket::http::{ContentType, Cookie, CookieJar, Status};
 use rocket::request::{self, FlashMessage, Form, FromRequest, Request};
 use rocket::response::{Flash, Redirect};
+use rocket::tokio::sync::{mpsc, oneshot};
 use rocket::State;
 
 use rocket_contrib::templates::Template;
@@ -41,6 +41,16 @@ impl<'a, 'r> FromRequest<'a, 'r> for User {
         };
 
         request::Outcome::Success(user)
+    }
+}
+
+pub struct WebappState {
+    tx: mpsc::Sender<WikiRequest>,
+}
+
+impl WebappState {
+    pub fn new(tx: mpsc::Sender<WikiRequest>) -> Self {
+        WebappState { tx }
     }
 }
 
@@ -130,63 +140,29 @@ pub fn new_page(_user: User) -> Template {
 }
 
 #[post("/", data = "<form>")]
-pub fn new_page_post(
+pub async fn new_page_post(
     form: Form<NewForm>,
     user: User,
-    state: State<'_, AppState>,
+    state: State<'_, WebappState>,
 ) -> Result<Redirect, Status> {
     // TODO check for legal characters in path
     let form_file = form.file.replace(" ", "_");
     let file = Path::new(&form_file);
-    if !state.can_create(&file) {
-        return Err(Status::BadRequest);
-    }
 
-    {
-        let _ = state.dir_lock.lock().unwrap();
+    let (tx, rx) = oneshot::channel();
+    state
+        .tx
+        .send(WikiRequest::CreateFile {
+            user,
+            file: file.to_path_buf().into_boxed_path(),
+            content: form.content.clone(),
+            respond: tx,
+        })
+        .await
+        .map_err(|_| Status::InternalServerError)?;
 
-        let path = Path::new(&state.config.path).join("src").join(&file);
-
-        if let Some(parent) = path.parent() {
-            if !parent.is_dir() {
-                fs::create_dir_all(parent)
-                    .map_err(log_warn)
-                    .map_err(|_| Status::InternalServerError)?;
-            }
-        }
-
-        let mut ancestors = file.ancestors();
-        ancestors.next();
-        for dir in ancestors {
-            let index = Path::new(&state.config.path)
-                .join("src")
-                .join(&dir)
-                .join("README.md");
-            if !index.is_file() {
-                debug!("creating {}", index.to_string_lossy());
-                fs::write(
-                    index,
-                    format!(
-                        "# {}",
-                        dir.file_stem()
-                            .map(OsStr::to_str)
-                            .flatten()
-                            .unwrap_or("TODO")
-                    ),
-                )
-                .map_err(log_warn)
-                .map_err(|_| Status::InternalServerError)?;
-            }
-        }
-
-        fs::write(path, &form.content)
-            .map_err(log_warn)
-            .map_err(|_| Status::InternalServerError)?;
-
-        state
-            .on_created(&user, &file)
-            .map_err(log_warn)
-            .map_err(|_| Status::InternalServerError)?;
+    if !rx.await.map_err(|_| Status::InternalServerError)?.is_ok() {
+        return Err(Status::InternalServerError);
     }
 
     let html_file = Path::new(&form.file).with_extension("html");
@@ -202,7 +178,7 @@ pub fn new_page_post(
 
 #[derive(Serialize)]
 struct EditContext {
-    file: PathBuf,
+    file: std::path::PathBuf,
     content: String,
 }
 
@@ -212,16 +188,17 @@ pub struct EditForm {
 }
 
 #[get("/<file..>")]
-pub fn edit_page(
-    file: PathBuf,
+pub async fn edit_page(
+    file: std::path::PathBuf,
     _user: User,
-    state: State<'_, AppState>,
+    config: State<'_, Config>,
 ) -> Result<Template, Status> {
-    if !state.can_edit(&file) {
+    if !config.can_edit(&PathBuf::from(&file)).await {
         return Err(Status::NotFound);
     }
-    let path = Path::new(&state.config.path).join("src").join(&file);
+    let path = Path::new(&config.path).join("src").join(&file);
     let content = fs::read_to_string(&path)
+        .await
         .map_err(log_warn)
         .map_err(|_| Status::NotFound)?;
     let context = EditContext { file, content };
@@ -229,28 +206,26 @@ pub fn edit_page(
 }
 
 #[post("/<file..>", data = "<form>")]
-pub fn edit_page_post(
-    file: PathBuf,
+pub async fn edit_page_post(
+    file: std::path::PathBuf,
     form: Form<EditForm>,
     user: User,
-    state: State<'_, AppState>,
+    state: State<'_, WebappState>,
 ) -> Result<Redirect, Status> {
-    if !state.can_edit(&file) {
-        return Err(Status::NotFound);
-    }
+    let (tx, rx) = oneshot::channel();
+    state
+        .tx
+        .send(WikiRequest::EditFile {
+            user,
+            file: PathBuf::from(file.to_path_buf()).into_boxed_path(),
+            content: form.content.clone(),
+            respond: tx,
+        })
+        .await
+        .map_err(|_| Status::InternalServerError)?;
 
-    {
-        let _ = state.dir_lock.lock().unwrap();
-
-        let path = Path::new(&state.config.path).join("src").join(&file);
-        fs::write(path, &form.content)
-            .map_err(log_warn)
-            .map_err(|_| Status::InternalServerError)?;
-
-        state
-            .on_edited(&user, &file)
-            .map_err(log_warn)
-            .map_err(|_| Status::InternalServerError)?;
+    if !rx.await.map_err(|_| Status::InternalServerError)?.is_ok() {
+        return Err(Status::InternalServerError);
     }
 
     let html_file = file.with_extension("html");
@@ -269,7 +244,7 @@ pub async fn upload_image(
     data: Data,
     _user: User,
     content_type: &ContentType,
-    state: State<'_, AppState>,
+    config: State<'_, Config>,
 ) -> Result<String, ()> {
     let filename = rand_safe_string(16);
     let extension = if *content_type == ContentType::JPEG {
@@ -284,7 +259,7 @@ pub async fn upload_image(
         return Err(());
     };
 
-    let file_path = Path::new(&state.config.path)
+    let file_path = Path::new(&config.path)
         .join("src/images")
         .join(&filename)
         .with_extension(&extension);

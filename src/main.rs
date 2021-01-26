@@ -1,8 +1,8 @@
-#![feature(proc_macro_hygiene, decl_macro)]
+#![feature(proc_macro_hygiene, decl_macro, async_closure)]
 
 mod config;
-mod routes;
 mod utils;
+mod webapp;
 mod wiki;
 
 #[macro_use]
@@ -14,16 +14,19 @@ extern crate log;
 use std::path::Path;
 
 use config::Config;
-use wiki::AppState;
+use webapp::WebappState;
+use wiki::WikiState;
 
 use rocket::fairing::AdHoc;
 use rocket::figment::Figment;
+use rocket::futures::join;
+use rocket::tokio::task;
 use rocket_contrib::helmet::SpaceHelmet;
 use rocket_contrib::serve::StaticFiles;
 use rocket_contrib::templates::Template;
 
-fn rocket(state: AppState, static_path: &Path) -> rocket::Rocket {
-    use routes::*;
+fn rocket(state: WebappState, static_path: &Path) -> rocket::Rocket {
+    use webapp::*;
 
     let figment = Figment::from(rocket::Config::default()).merge(Config::figment());
 
@@ -45,19 +48,27 @@ fn rocket(state: AppState, static_path: &Path) -> rocket::Rocket {
 async fn main() {
     env_logger::init_from_env("LOG_LEVEL");
 
-    let state = AppState::new();
+    let (wiki_state, webapp_state) = WikiState::new();
 
-    let build_path = state.setup().unwrap();
+    let build_path = wiki_state.setup().await.unwrap();
 
-    rocket(state, &*build_path).launch().await.unwrap();
+    let wiki = task::spawn(async { wiki_state.serve().await });
+
+    join!(wiki, rocket(webapp_state, &build_path).launch())
+        .1
+        .unwrap();
 }
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
+    use std::future::Future;
     use std::path::Path;
 
+    use rocket::futures::executor::block_on;
     use rocket::http::{ContentType, Status};
-    use rocket::local::blocking::Client;
+    use rocket::local::asynchronous::Client;
 
     use figment::Jail;
 
@@ -70,36 +81,59 @@ username = "user"
 password = "password"
 "#;
 
-    fn get_rocket_instance(jail: &mut Jail) -> (rocket::Rocket, Box<Path>) {
-        use super::*;
-
+    async fn get_rocket_instance(jail: &mut Jail) -> (rocket::Rocket, WikiState, Box<Path>) {
         let book_path = jail.directory().join("mdwiki-test-dir");
 
         jail.create_file("mdwiki.toml", TEST_CONFIG).unwrap();
 
         jail.set_env("MDWIKI_PATH", book_path.to_str().unwrap());
 
-        let state = AppState::new();
+        let (wiki_state, webapp_state) = WikiState::new();
 
-        let build_path = state.setup().unwrap();
+        let build_path = wiki_state.setup().await.unwrap();
 
-        (rocket(state, &*build_path), book_path.into_boxed_path())
+        (
+            rocket(webapp_state, &*build_path),
+            wiki_state,
+            book_path.into_boxed_path(),
+        )
     }
 
-    #[test]
-    fn bootstrap_wiki() {
+    fn run_test<Fut>(test: impl FnOnce(Client) -> Fut)
+    where
+        Fut: Future<Output = Result<(), figment::Error>>,
+    {
         Jail::expect_with(|jail| {
-            let (rocket, _book_path) = get_rocket_instance(jail);
+            block_on(async {
+                let (rocket, wiki, _book_path) = get_rocket_instance(jail).await;
+                let wiki = task::spawn(async { wiki.serve().await });
 
-            let client = Client::tracked(rocket).expect("valid rocket instance");
+                let client = Client::tracked(rocket)
+                    .await
+                    .expect("valid rocket instance");
 
-            assert_eq!(client.get("/index.html").dispatch().status(), Status::Ok);
-            assert_eq!(client.get("/SUMMARY.html").dispatch().status(), Status::Ok);
+                join!(wiki, test(client)).1
+            })
+        });
+    }
 
-            let response = client.get("/").dispatch();
+    #[rocket::async_test]
+    async fn bootstrap_wiki() {
+        run_test(async move |client: Client| {
+            assert_eq!(
+                client.get("/index.html").dispatch().await.status(),
+                Status::Ok
+            );
+            assert_eq!(
+                client.get("/SUMMARY.html").dispatch().await.status(),
+                Status::Ok
+            );
+
+            let response = client.get("/").dispatch().await;
             assert_eq!(response.status(), Status::Ok);
             assert!(response
                 .into_string()
+                .await
                 .unwrap()
                 .contains(r#"// mdwiki theme override script to add "edit" and "new" buttons"#));
 
@@ -107,18 +141,15 @@ password = "password"
         });
     }
 
-    #[test]
-    fn login() {
-        Jail::expect_with(|jail| {
-            let (rocket, _book_path) = get_rocket_instance(jail);
-
-            let client = Client::tracked(rocket).expect("valid rocket instance");
-
+    #[rocket::async_test]
+    async fn login() {
+        run_test(async move |client: Client| {
             let response = client
                 .post("/login")
                 .header(ContentType::Form)
                 .body("username=user&password=password")
-                .dispatch();
+                .dispatch()
+                .await;
 
             assert_eq!(response.status(), Status::SeeOther);
             assert_eq!(response.headers().get_one("location"), Some("/"));
@@ -127,24 +158,22 @@ password = "password"
         });
     }
 
-    #[test]
-    fn new_page() {
-        Jail::expect_with(|jail| {
-            let (rocket, _book_path) = get_rocket_instance(jail);
-
-            let client = Client::tracked(rocket).expect("valid rocket instance");
-
+    #[rocket::async_test]
+    async fn new_page() {
+        run_test(async move |client: Client| {
             client
                 .post("/login")
                 .header(ContentType::Form)
                 .body("username=user&password=password")
-                .dispatch();
+                .dispatch()
+                .await;
 
             let response = client
                 .post("/new")
                 .header(ContentType::Form)
                 .body("file=newfile.md&content=NEWPAGE")
-                .dispatch();
+                .dispatch()
+                .await;
 
             assert_eq!(response.status(), Status::SeeOther);
             assert_eq!(
@@ -152,32 +181,30 @@ password = "password"
                 Some("/newfile.html")
             );
 
-            let response = client.get("/newfile.html").dispatch();
+            let response = client.get("/newfile.html").dispatch().await;
             assert_eq!(response.status(), Status::Ok);
-            assert!(response.into_string().unwrap().contains("NEWPAGE"));
+            assert!(response.into_string().await.unwrap().contains("NEWPAGE"));
 
             Ok(())
         });
     }
 
-    #[test]
-    fn new_page_with_dirs() {
-        Jail::expect_with(|jail| {
-            let (rocket, _book_path) = get_rocket_instance(jail);
-
-            let client = Client::tracked(rocket).expect("valid rocket instance");
-
+    #[rocket::async_test]
+    async fn new_page_with_dirs() {
+        run_test(async move |client: Client| {
             client
                 .post("/login")
                 .header(ContentType::Form)
                 .body("username=user&password=password")
-                .dispatch();
+                .dispatch()
+                .await;
 
             let response = client
                 .post("/new")
                 .header(ContentType::Form)
                 .body("file=newdir/newfile.md&content=NEWPAGE")
-                .dispatch();
+                .dispatch()
+                .await;
 
             assert_eq!(response.status(), Status::SeeOther);
             assert_eq!(
@@ -185,45 +212,47 @@ password = "password"
                 Some("/newdir/newfile.html")
             );
 
-            assert_eq!(client.get("/newdir/").dispatch().status(), Status::Ok);
+            assert_eq!(client.get("/newdir/").dispatch().await.status(), Status::Ok);
             assert_eq!(
-                client.get("/newdir/index.html").dispatch().status(),
+                client.get("/newdir/index.html").dispatch().await.status(),
                 Status::Ok
             );
             assert_eq!(
-                client.get("/newdir/newfile.html").dispatch().status(),
+                client.get("/newdir/newfile.html").dispatch().await.status(),
                 Status::Ok
             );
 
             Ok(())
-        })
+        });
     }
 
-    #[test]
-    fn edit_page() {
-        Jail::expect_with(|jail| {
-            let (rocket, _book_path) = get_rocket_instance(jail);
-
-            let client = Client::tracked(rocket).expect("valid rocket instance");
-
+    #[rocket::async_test]
+    async fn edit_page() {
+        run_test(async move |client: Client| {
             client
                 .post("/login")
                 .header(ContentType::Form)
                 .body("username=user&password=password")
-                .dispatch();
+                .dispatch()
+                .await;
 
             let response = client
                 .post("/edit/README.md")
                 .header(ContentType::Form)
                 .body("content=EDITEDCONTENT")
-                .dispatch();
+                .dispatch()
+                .await;
 
             assert_eq!(response.status(), Status::SeeOther);
             assert_eq!(response.headers().get_one("location"), Some("/"));
 
-            let response = client.get("/index.html").dispatch();
+            let response = client.get("/index.html").dispatch().await;
             assert_eq!(response.status(), Status::Ok);
-            assert!(response.into_string().unwrap().contains("EDITEDCONTENT"));
+            assert!(response
+                .into_string()
+                .await
+                .unwrap()
+                .contains("EDITEDCONTENT"));
 
             Ok(())
         })
