@@ -4,10 +4,10 @@
 {% endblock extra_head %}
 {% block header %}Login{% endblock header %}
 {% block content %}
-    {% if status_message is string %}
-        {{ status_message }}
+    {% if message %}
+        <div class="warning">{{ message }}</div>
     {% endif %}
-    {% if user is string %}
+    {% if user %}
         You are already logged in as {{ user }}
     {% else %}
         <form method="POST">

@@ -23,17 +23,34 @@ const MDWIKI_GITIGNORE: &str = include_str!("../files/default_gitignore");
 
 #[derive(Debug)]
 pub enum WikiResponse {
-    OK,
-    NotAllowed,
-    NotFound,
-    Error(String),
+    OK(Option<String>),
+    BadRequest(Option<String>),
+    NotAllowed(Option<String>),
+    NotFound(Option<String>),
+    Error(Option<String>),
 }
 
 impl WikiResponse {
     pub fn is_ok(&self) -> bool {
         match self {
-            WikiResponse::OK => true,
+            WikiResponse::OK(_) => true,
             _ => false,
+        }
+    }
+    pub fn result(self) -> Result<Self, Self> {
+        if self.is_ok() {
+            Ok(self)
+        } else {
+            Err(self)
+        }
+    }
+    pub fn msg(&self) -> Option<&String> {
+        match self {
+            WikiResponse::OK(msg)
+            | WikiResponse::BadRequest(msg)
+            | WikiResponse::NotAllowed(msg)
+            | WikiResponse::NotFound(msg)
+            | WikiResponse::Error(msg) => msg.as_ref(),
         }
     }
 }
@@ -104,12 +121,13 @@ impl WikiState {
                     if let Err(err) = self
                         .on_created(&user, &*file)
                         .await
-                        .map_err(WikiResponse::Error)
+                        .map_err(log_warn)
+                        .map_err(|_| WikiResponse::Error(None))
                     {
                         let _ = respond.send(err);
                         continue;
                     }
-                    let _ = respond.send(WikiResponse::OK);
+                    let _ = respond.send(WikiResponse::OK(None));
                 }
                 WikiRequest::EditFile {
                     user,
@@ -124,21 +142,20 @@ impl WikiState {
                     if let Err(err) = self
                         .on_edited(&user, &*file)
                         .await
-                        .map_err(WikiResponse::Error)
+                        .map_err(log_warn)
+                        .map_err(|_| WikiResponse::Error(None))
                     {
                         let _ = respond.send(err);
                         continue;
                     }
 
-                    let _ = respond.send(WikiResponse::OK);
+                    let _ = respond.send(WikiResponse::OK(None));
                 }
             }
         }
     }
     async fn create_file(&self, file: &Path, content: String) -> Result<(), WikiResponse> {
-        if !self.config.can_create(file).await {
-            return Err(WikiResponse::NotAllowed);
-        }
+        self.config.can_create(file).await.result()?;
 
         let path = Path::new(&self.config.path).join("src").join(&file);
 
@@ -147,7 +164,7 @@ impl WikiState {
                 fs::create_dir_all(parent)
                     .await
                     .map_err(log_warn)
-                    .map_err(|e| WikiResponse::Error(e.to_string()))?;
+                    .map_err(|_| WikiResponse::Error(None))?;
             }
         }
 
@@ -172,14 +189,14 @@ impl WikiState {
                 )
                 .await
                 .map_err(log_warn)
-                .map_err(|e| WikiResponse::Error(e.to_string()))?;
+                .map_err(|_| WikiResponse::Error(None))?;
             }
         }
 
         fs::write(path, content)
             .await
             .map_err(log_warn)
-            .map_err(|e| WikiResponse::Error(e.to_string()))?;
+            .map_err(|_| WikiResponse::Error(None))?;
 
         Ok(())
     }
@@ -203,15 +220,13 @@ impl WikiState {
         Ok(())
     }
     async fn edit_file(&self, file: &Path, content: String) -> Result<(), WikiResponse> {
-        if !self.config.can_edit(&file).await {
-            return Err(WikiResponse::NotAllowed);
-        }
+        self.config.can_edit(&file).await.result()?;
 
         let path = Path::new(&self.config.path).join("src").join(&file);
         fs::write(path, content)
             .await
             .map_err(log_warn)
-            .map_err(|e| WikiResponse::Error(e.to_string()))?;
+            .map_err(|_| WikiResponse::Error(None))?;
 
         Ok(())
     }

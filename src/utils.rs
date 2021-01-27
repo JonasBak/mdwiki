@@ -1,9 +1,21 @@
+use crate::wiki::WikiResponse;
+
 use async_std::path::{Component, Path};
 
 use rand::Rng;
 
-const RESERVED_NAMES: &[&str] = &["SUMMARY.md", "index.md"];
-const RESERVED_PREFIXES: &[&str] = &["new", "edit", "upload", "images"];
+#[macro_export]
+macro_rules! try_response {
+    ( $resp:expr ) => {{
+        if !$resp.is_ok() {
+            return $resp;
+        }
+        $resp
+    }};
+}
+
+pub const RESERVED_NAMES: &[&str] = &["SUMMARY.md", "index.md"];
+pub const RESERVED_PREFIXES: &[&str] = &["new", "edit", "upload", "images"];
 
 pub fn log_warn<T: std::fmt::Display>(err: T) -> T {
     warn!("{}", err);

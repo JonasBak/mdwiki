@@ -29,6 +29,11 @@
                 color: var(--icons-hover);
                 padding: 5px 10px;
             }
+            .warning {
+                padding: 10px 30px;
+                margin: 20px 0px;
+                border: 3px dashed #ff9f83;
+            }
         </style>
 
         {% block extra_head %}{% endblock extra_head %}

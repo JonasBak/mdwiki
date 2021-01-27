@@ -1,7 +1,8 @@
 #![feature(proc_macro_hygiene, decl_macro, async_closure)]
 
-mod config;
+#[macro_use]
 mod utils;
+mod config;
 mod webapp;
 mod wiki;
 

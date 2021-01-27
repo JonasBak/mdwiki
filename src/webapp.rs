@@ -1,6 +1,6 @@
 use crate::config::{Config, User};
 use crate::utils::*;
-use crate::wiki::WikiRequest;
+use crate::wiki::{WikiRequest, WikiResponse};
 
 use async_std::fs;
 use async_std::path::{Path, PathBuf};
@@ -8,7 +8,7 @@ use async_std::path::{Path, PathBuf};
 use rocket::data::{Data, ToByteUnit};
 use rocket::http::{ContentType, Cookie, CookieJar, Status};
 use rocket::request::{self, FlashMessage, Form, FromRequest, Request};
-use rocket::response::{Flash, Redirect};
+use rocket::response::{self, Flash, Redirect, Responder, Response};
 use rocket::tokio::sync::{mpsc, oneshot};
 use rocket::State;
 
@@ -56,7 +56,7 @@ impl WebappState {
 
 #[derive(Serialize)]
 struct LoginContext {
-    status_message: Option<String>,
+    message: Option<String>,
     user: Option<String>,
 }
 
@@ -67,9 +67,9 @@ pub struct LoginForm {
 }
 
 #[get("/")]
-pub fn login(flash: Option<FlashMessage>, user: Option<User>) -> Template {
+pub fn login(message: Option<FlashMessage>, user: Option<User>) -> Template {
     let context = LoginContext {
-        status_message: flash.map(|f| f.msg().to_string()),
+        message: message.map(|f| f.msg().to_string()),
         user: user.map(|user| user.username),
     };
     Template::render("login", &context)
@@ -125,7 +125,9 @@ pub fn mdwiki_script(user: Option<User>) -> Template {
 }
 
 #[derive(Serialize)]
-struct NewContext {}
+struct NewContext {
+    message: Option<String>,
+}
 
 #[derive(FromForm)]
 pub struct NewForm {
@@ -134,8 +136,10 @@ pub struct NewForm {
 }
 
 #[get("/")]
-pub fn new_page(_user: User) -> Template {
-    let context = NewContext {};
+pub fn new_page(message: Option<FlashMessage>, _user: User) -> Template {
+    let context = NewContext {
+        message: message.map(|f| f.msg().to_string()),
+    };
     Template::render("new_page", &context)
 }
 
@@ -144,7 +148,7 @@ pub async fn new_page_post(
     form: Form<NewForm>,
     user: User,
     state: State<'_, WebappState>,
-) -> Result<Redirect, Status> {
+) -> Result<Redirect, Flash<Redirect>> {
     // TODO check for legal characters in path
     let form_file = form.file.replace(" ", "_");
     let file = Path::new(&form_file);
@@ -159,10 +163,18 @@ pub async fn new_page_post(
             respond: tx,
         })
         .await
-        .map_err(|_| Status::InternalServerError)?;
+        .map_err(log_warn)
+        .map_err(|_| "")
+        .unwrap();
 
-    if !rx.await.map_err(|_| Status::InternalServerError)?.is_ok() {
-        return Err(Status::InternalServerError);
+    let res = rx.await.map_err(log_warn).unwrap();
+    if !res.is_ok() {
+        return Err(Flash::error(
+            Redirect::to("/new"),
+            res.msg()
+                .cloned()
+                .unwrap_or("Something went wrong :(".to_string()),
+        ));
     }
 
     let html_file = Path::new(&form.file).with_extension("html");
@@ -170,7 +182,7 @@ pub async fn new_page_post(
         "/{}",
         html_file
             .to_str()
-            .ok_or_else(|| Status::InternalServerError)?
+            .unwrap()
             .replace("README.html", "")
             .to_string()
     )));
@@ -180,6 +192,7 @@ pub async fn new_page_post(
 struct EditContext {
     file: std::path::PathBuf,
     content: String,
+    message: Option<String>,
 }
 
 #[derive(FromForm)]
@@ -190,18 +203,23 @@ pub struct EditForm {
 #[get("/<file..>")]
 pub async fn edit_page(
     file: std::path::PathBuf,
+    message: Option<FlashMessage<'_, '_>>,
     _user: User,
     config: State<'_, Config>,
-) -> Result<Template, Status> {
-    if !config.can_edit(&PathBuf::from(&file)).await {
-        return Err(Status::NotFound);
+) -> Result<Template, Option<Flash<Redirect>>> {
+    if !config.can_edit(&PathBuf::from(&file)).await.is_ok() {
+        return Err(None);
     }
     let path = Path::new(&config.path).join("src").join(&file);
     let content = fs::read_to_string(&path)
         .await
         .map_err(log_warn)
-        .map_err(|_| Status::NotFound)?;
-    let context = EditContext { file, content };
+        .map_err(|_| None)?;
+    let context = EditContext {
+        file,
+        content,
+        message: message.map(|f| f.msg().to_string()),
+    };
     Ok(Template::render("edit_page", &context))
 }
 
@@ -211,7 +229,7 @@ pub async fn edit_page_post(
     form: Form<EditForm>,
     user: User,
     state: State<'_, WebappState>,
-) -> Result<Redirect, Status> {
+) -> Result<Redirect, Option<Flash<Redirect>>> {
     let (tx, rx) = oneshot::channel();
     state
         .tx
@@ -222,10 +240,18 @@ pub async fn edit_page_post(
             respond: tx,
         })
         .await
-        .map_err(|_| Status::InternalServerError)?;
+        .map_err(log_warn)
+        .map_err(|_| "")
+        .unwrap();
 
-    if !rx.await.map_err(|_| Status::InternalServerError)?.is_ok() {
-        return Err(Status::InternalServerError);
+    let res = rx.await.map_err(log_warn).unwrap();
+    if !res.is_ok() {
+        return Err(Some(Flash::error(
+            Redirect::to(format!("/edit/{}", file.display())),
+            res.msg()
+                .cloned()
+                .unwrap_or("Something went wrong :(".to_string()),
+        )));
     }
 
     let html_file = file.with_extension("html");
@@ -233,7 +259,7 @@ pub async fn edit_page_post(
         "/{}",
         html_file
             .to_str()
-            .ok_or_else(|| Status::InternalServerError)?
+            .unwrap()
             .replace("README.html", "")
             .to_string()
     )));

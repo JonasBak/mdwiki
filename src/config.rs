@@ -1,4 +1,5 @@
 use crate::utils::*;
+use crate::wiki::{WikiRequest, WikiResponse};
 
 use async_std::fs;
 use async_std::path::{Path, PathBuf};
@@ -65,39 +66,52 @@ impl Config {
             .merge(Env::prefixed("MDWIKI_").global())
     }
 
-    pub async fn can_edit(&self, path: &Path) -> bool {
+    async fn safe_path(&self, path: &Path) -> WikiResponse {
         if !path_is_simple(path) {
-            return false;
+            return WikiResponse::BadRequest(Some(format!("Path '{}' must be 'simple' i.e. in the form 'filename.extension' or 'directory/filename.extension'", path.display())));
         } else if path.extension().map(|ext| ext != "md").unwrap_or(true) {
-            return false;
+            return WikiResponse::BadRequest(Some(format!(
+                "File '{}' needs to be a markdown file with '.md' extension",
+                path.display()
+            )));
         } else if is_reserved_name(path) {
-            return false;
+            return WikiResponse::BadRequest(Some(format!(
+                "Path '{}' contains reserved filenames/directories",
+                path.display()
+            )));
         }
+        WikiResponse::OK(None)
+    }
+
+    pub async fn can_edit(&self, path: &Path) -> WikiResponse {
+        try_response!(self.safe_path(path).await);
 
         let full_path = Path::new(&self.path).join("src").join(&path);
 
         if !full_path.is_file().await {
-            return false;
+            return WikiResponse::NotFound(Some(format!("No file named '{}'", path.display())));
         }
-        true
+        WikiResponse::OK(None)
     }
-    pub async fn can_create(&self, path: &Path) -> bool {
-        if !path_is_simple(path) {
-            return false;
-        } else if path.extension().map(|ext| ext != "md").unwrap_or(true) {
-            return false;
-        } else if is_reserved_name(path) {
-            return false;
-        } else if path.ancestors().count() > 5 {
-            return false;
+    pub async fn can_create(&self, path: &Path) -> WikiResponse {
+        try_response!(self.safe_path(path).await);
+
+        if path.ancestors().count() > 5 {
+            return WikiResponse::BadRequest(Some(format!(
+                "Path '{}' contains too many nested directories",
+                path.display()
+            )));
         }
 
         let full_path = Path::new(&self.path).join("src").join(&path);
 
         if full_path.is_file().await {
-            return false;
+            return WikiResponse::BadRequest(Some(format!(
+                "File '{}' already exists",
+                path.display()
+            )));
         }
-        true
+        WikiResponse::OK(None)
     }
     pub async fn get_wiki_tree(&self) -> WikiTree {
         use rocket::futures::future::{BoxFuture, FutureExt};

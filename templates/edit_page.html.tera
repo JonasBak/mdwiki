@@ -6,6 +6,9 @@
 {% block header %}Edit {{ file }}{% endblock header %}
 {% block content %}
     <div id="image-upload-container"></div>
+    {% if message %}
+        <div class="warning">{{ message }}</div>
+    {% endif %}
     <form method="POST">
         <label for="content">
             Content:
