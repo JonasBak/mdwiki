@@ -1,6 +1,6 @@
 use crate::config::{Config, User};
 use crate::utils::*;
-use crate::wiki::{WikiRequest, WikiResponse};
+use crate::wiki::WikiRequest;
 
 use async_std::fs;
 use async_std::path::{Path, PathBuf};
@@ -8,10 +8,10 @@ use async_std::path::{Path, PathBuf};
 use rocket::data::{Data, ToByteUnit};
 use rocket::http::{ContentType, Cookie, CookieJar, Status};
 use rocket::request::{self, FlashMessage, Form, FromRequest, Request};
-use rocket::response::{self, Flash, Redirect, Responder, Response};
+use rocket::response::NamedFile;
+use rocket::response::{Flash, Redirect};
 use rocket::tokio::sync::{mpsc, oneshot};
 use rocket::State;
-
 use rocket_contrib::templates::Template;
 
 use serde::Serialize;
@@ -66,7 +66,7 @@ pub struct LoginForm {
     password: String,
 }
 
-#[get("/")]
+#[get("/login")]
 pub fn login(message: Option<FlashMessage>, user: Option<User>) -> Template {
     let context = LoginContext {
         message: message.map(|f| f.msg().to_string()),
@@ -75,7 +75,7 @@ pub fn login(message: Option<FlashMessage>, user: Option<User>) -> Template {
     Template::render("login", &context)
 }
 
-#[post("/", data = "<form>")]
+#[post("/login", data = "<form>")]
 pub fn login_post(
     form: Form<LoginForm>,
     config: State<'_, Config>,
@@ -105,7 +105,7 @@ pub fn login_post(
     ))
 }
 
-#[get("/")]
+#[get("/logout")]
 pub fn logout(cookies: &CookieJar<'_>) -> Redirect {
     cookies.remove_private(Cookie::named(MDWIKI_AUTH_COOKIE));
     Redirect::to("/")
@@ -116,7 +116,7 @@ struct ScriptContext {
     logged_in: bool,
 }
 
-#[get("/")]
+#[get("/mdwiki_script.js")]
 pub fn mdwiki_script(user: Option<User>) -> Template {
     let context = ScriptContext {
         logged_in: user.is_some(),
@@ -135,7 +135,7 @@ pub struct NewForm {
     content: String,
 }
 
-#[get("/")]
+#[get("/new")]
 pub fn new_page(message: Option<FlashMessage>, _user: User) -> Template {
     let context = NewContext {
         message: message.map(|f| f.msg().to_string()),
@@ -143,7 +143,7 @@ pub fn new_page(message: Option<FlashMessage>, _user: User) -> Template {
     Template::render("new_page", &context)
 }
 
-#[post("/", data = "<form>")]
+#[post("/new", data = "<form>")]
 pub async fn new_page_post(
     form: Form<NewForm>,
     user: User,
@@ -200,7 +200,7 @@ pub struct EditForm {
     content: String,
 }
 
-#[get("/<file..>")]
+#[get("/edit/<file..>")]
 pub async fn edit_page(
     file: std::path::PathBuf,
     message: Option<FlashMessage<'_, '_>>,
@@ -223,7 +223,7 @@ pub async fn edit_page(
     Ok(Template::render("edit_page", &context))
 }
 
-#[post("/<file..>", data = "<form>")]
+#[post("/edit/<file..>", data = "<form>")]
 pub async fn edit_page_post(
     file: std::path::PathBuf,
     form: Form<EditForm>,
@@ -265,7 +265,7 @@ pub async fn edit_page_post(
     )));
 }
 
-#[post("/image", data = "<data>")]
+#[post("/upload/image", data = "<data>")]
 pub async fn upload_image(
     data: Data,
     _user: User,
@@ -297,4 +297,39 @@ pub async fn upload_image(
         .map_err(|_| ())?;
 
     Ok(format!("/images/{}.{}", filename, extension))
+}
+
+#[get("/", rank = 10)]
+pub async fn index() -> Redirect {
+    Redirect::permanent("/index.html")
+}
+
+#[get("/<path..>", rank = 10)]
+pub async fn book_files(
+    path: std::path::PathBuf,
+    user: Option<User>,
+    config: State<'_, Config>,
+) -> Result<Option<NamedFile>, Redirect> {
+    const SAFE_PREFIXES: &[&'static str] = &["css", "FontAwesome", "favicon.svg"];
+
+    if !config.allow_anonymous
+        && user.is_none()
+        && SAFE_PREFIXES
+            .iter()
+            .find(|prefix| path.starts_with(prefix))
+            .is_none()
+    {
+        return Err(Redirect::to(uri!(login)));
+    }
+
+    let full_path = Path::new(&config.path).join(&config.book_path).join(&path);
+
+    if full_path.is_dir().await {
+        return Err(Redirect::permanent(format!(
+            "/{}",
+            path.join("index.html").to_str().unwrap()
+        )));
+    }
+
+    Ok(NamedFile::open(full_path).await.ok())
 }

@@ -87,7 +87,7 @@ impl WikiState {
             WebappState::new(tx),
         )
     }
-    pub async fn setup(&self) -> Result<Box<std::path::Path>, String> {
+    pub async fn setup(&self) -> Result<(), String> {
         info!(
             "setting up mdwiki with configuration: book path = {}",
             self.config.path
@@ -100,10 +100,7 @@ impl WikiState {
         book.build()
             .map_err(|e| format!("failed to build book: {}", e))?;
 
-        let build_path: std::path::PathBuf = Path::new(&self.config.path)
-            .join(book.config.build.build_dir)
-            .into();
-        Ok(build_path.into_boxed_path())
+        Ok(())
     }
     pub async fn serve(mut self) {
         while let Some(req) = self.rx.recv().await {

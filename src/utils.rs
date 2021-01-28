@@ -1,5 +1,3 @@
-use crate::wiki::WikiResponse;
-
 use async_std::path::{Component, Path};
 
 use rand::Rng;

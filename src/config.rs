@@ -1,5 +1,5 @@
 use crate::utils::*;
-use crate::wiki::{WikiRequest, WikiResponse};
+use crate::wiki::WikiResponse;
 
 use async_std::fs;
 use async_std::path::{Path, PathBuf};
@@ -42,14 +42,20 @@ pub struct User {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     pub path: String,
+    pub book_path: String,
+
     pub users: Vec<User>,
+    pub allow_anonymous: bool,
 }
 
 impl Default for Config {
     fn default() -> Config {
         Config {
-            path: "./mdwiki".into(),
+            path: "./mdwiki".to_string(),
+            book_path: "book".to_string(),
+
             users: Vec::new(),
+            allow_anonymous: true,
         }
     }
 }
