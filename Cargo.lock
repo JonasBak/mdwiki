@@ -1537,6 +1537,7 @@ dependencies = [
  "mdbook",
  "once_cell",
  "rand 0.8.2",
+ "regex",
  "rocket",
  "rocket_contrib",
  "serde",

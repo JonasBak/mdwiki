@@ -7,11 +7,15 @@ use crate::webapp::WebappState;
 use async_std::fs;
 use async_std::path::Path;
 
+use once_cell::sync::Lazy;
+
 use rocket::tokio::sync::{mpsc, oneshot};
 
 use mdbook::MDBook;
 
 use git2::{IndexAddOption, Repository, Signature};
+
+use regex::Regex;
 
 const SUMMARY_HEAD: &str = include_str!("../files/summary_head.md");
 
@@ -20,6 +24,9 @@ const THEME_OVERRIDE_SCRIPT: &str = include_str!("../files/theme_override_head.h
 const MDWIKI_README: &str = include_str!("../files/default_README.md");
 const MDWIKI_BOOK_TOML: &str = include_str!("../files/default_book.toml");
 const MDWIKI_GITIGNORE: &str = include_str!("../files/default_gitignore");
+
+pub const IMAGE_LINK_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"!\[[^\[\]]*\]\(/images/(\w+\.\w+)\)"#).unwrap());
 
 #[derive(Debug)]
 pub enum WikiResponse {
@@ -111,10 +118,11 @@ impl WikiState {
                     content,
                     respond,
                 } => {
-                    if let Err(err) = self.create_file(&*file, content).await {
+                    if let Err(err) = self.create_file(&*file, &content).await {
                         let _ = respond.send(err);
                         continue;
                     }
+                    let _ = self.move_new_images(&content).await;
                     if let Err(err) = self
                         .on_created(&user, &*file)
                         .await
@@ -132,10 +140,11 @@ impl WikiState {
                     content,
                     respond,
                 } => {
-                    if let Err(err) = self.edit_file(&*file, content).await {
+                    if let Err(err) = self.edit_file(&*file, &content).await {
                         let _ = respond.send(err);
                         continue;
                     }
+                    let _ = self.move_new_images(&content).await;
                     if let Err(err) = self
                         .on_edited(&user, &*file)
                         .await
@@ -151,7 +160,7 @@ impl WikiState {
             }
         }
     }
-    async fn create_file(&self, file: &Path, content: String) -> Result<(), WikiResponse> {
+    async fn create_file(&self, file: &Path, content: &String) -> Result<(), WikiResponse> {
         self.config.can_create(file).await.result()?;
 
         let path = Path::new(&self.config.path).join("src").join(&file);
@@ -216,7 +225,7 @@ impl WikiState {
 
         Ok(())
     }
-    async fn edit_file(&self, file: &Path, content: String) -> Result<(), WikiResponse> {
+    async fn edit_file(&self, file: &Path, content: &String) -> Result<(), WikiResponse> {
         self.config.can_edit(&file).await.result()?;
 
         let path = Path::new(&self.config.path).join("src").join(&file);
@@ -285,7 +294,6 @@ impl WikiState {
                     )
                 })?;
             }
-
             fs::write(book_path.join("book.toml"), MDWIKI_BOOK_TOML)
                 .await
                 .map_err(|e| format!("could not write book.toml: {}", e))?;
@@ -314,6 +322,16 @@ impl WikiState {
                 .await
                 .map_err(|e| format!("failed to write theme script: {}", e))?;
         }
+        let tmp_upload_path = Path::new(&self.config.tmp_upload_path);
+        if !tmp_upload_path.is_dir().await {
+            fs::create_dir(&tmp_upload_path).await.map_err(|e| {
+                format!(
+                    "could not create directory '{}': {}",
+                    self.config.tmp_upload_path, e
+                )
+            })?;
+        }
+
         Ok(())
     }
     fn get_book(&self) -> Result<(MDBook, Repository), String> {
@@ -437,5 +455,35 @@ impl WikiState {
             .map_err(|e| format!("failed to create initial commit: {}", e))?;
         }
         Ok(())
+    }
+    async fn move_new_images(&self, content: &String) -> Result<(), Vec<String>> {
+        let captures: Vec<_> = IMAGE_LINK_REGEX
+            .captures_iter(content)
+            .map(|cap| cap[1].to_string())
+            .collect();
+        let mut failed = Vec::new();
+        for filename in captures {
+            let uploaded_file = Path::new(&self.config.tmp_upload_path).join(&filename);
+            if uploaded_file.is_file().await {
+                debug!("adding image: {}", &filename);
+                if fs::rename(
+                    uploaded_file,
+                    Path::new(&self.config.path)
+                        .join("src/images")
+                        .join(&filename),
+                )
+                .await
+                .is_err()
+                {
+                    warn!("failed to add image: {}", &filename);
+                    failed.push(filename)
+                }
+            }
+        }
+        if failed.len() == 0 {
+            Ok(())
+        } else {
+            Err(failed)
+        }
     }
 }

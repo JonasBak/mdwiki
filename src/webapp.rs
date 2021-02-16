@@ -285,8 +285,7 @@ pub async fn upload_image(
         return Err(());
     };
 
-    let file_path = Path::new(&config.path)
-        .join("src/images")
+    let file_path = Path::new(&config.tmp_upload_path)
         .join(&filename)
         .with_extension(&extension);
 

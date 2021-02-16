@@ -1,6 +1,8 @@
 use crate::utils::*;
 use crate::wiki::WikiResponse;
 
+use std::env;
+
 use async_std::fs;
 use async_std::path::{Path, PathBuf};
 use async_std::prelude::*;
@@ -43,6 +45,7 @@ pub struct User {
 pub struct Config {
     pub path: String,
     pub book_path: String,
+    pub tmp_upload_path: String,
 
     pub users: Vec<User>,
     pub allow_anonymous: bool,
@@ -53,6 +56,11 @@ impl Default for Config {
         Config {
             path: "./mdwiki".to_string(),
             book_path: "book".to_string(),
+            tmp_upload_path: env::temp_dir()
+                .join("mdwiki_tmp_uploads")
+                .to_str()
+                .unwrap()
+                .into(),
 
             users: Vec::new(),
             allow_anonymous: true,
