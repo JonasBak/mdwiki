@@ -14,13 +14,13 @@
             Filename:
         </label>
         <br/>
-        <input id="file" name="file"/>
+        <input id="file" name="file" value="{% if file %}{{ file }}{% endif %}"/>
         <br/>
         <label for="content">
             Content:
         </label>
         <br/>
-        <textarea id="file-content" name="content"></textarea>
+        <textarea id="file-content" name="content">{% if content %}{{ content }}{% endif %}</textarea>
         <br/>
         <button
             id="upload-button"

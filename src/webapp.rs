@@ -126,6 +126,8 @@ pub fn mdwiki_script(user: Option<User>) -> Template {
 
 #[derive(Serialize)]
 struct NewContext {
+    file: String,
+    content: String,
     message: Option<String>,
 }
 
@@ -138,6 +140,8 @@ pub struct NewForm {
 #[get("/new")]
 pub fn new_page(message: Option<FlashMessage>, _user: User) -> Template {
     let context = NewContext {
+        file: "".to_string(),
+        content: "".to_string(),
         message: message.map(|f| f.msg().to_string()),
     };
     Template::render("new_page", &context)
@@ -148,7 +152,7 @@ pub async fn new_page_post(
     form: Form<NewForm>,
     user: User,
     state: State<'_, WebappState>,
-) -> Result<Redirect, Flash<Redirect>> {
+) -> Result<Redirect, Template> {
     // TODO check for legal characters in path
     let form_file = form.file.replace(" ", "_");
     let file = Path::new(&form_file);
@@ -169,12 +173,16 @@ pub async fn new_page_post(
 
     let res = rx.await.map_err(log_warn).unwrap();
     if !res.is_ok() {
-        return Err(Flash::error(
-            Redirect::to("/new"),
-            res.msg()
-                .cloned()
-                .unwrap_or("Something went wrong :(".to_string()),
-        ));
+        let context = NewContext {
+            file: form.file.clone(),
+            content: form.content.clone(),
+            message: Some(
+                res.msg()
+                    .cloned()
+                    .unwrap_or("Something went wrong :(".to_string()),
+            ),
+        };
+        return Err(Template::render("new_page", &context));
     }
 
     let html_file = Path::new(&form.file).with_extension("html");
@@ -229,7 +237,7 @@ pub async fn edit_page_post(
     form: Form<EditForm>,
     user: User,
     state: State<'_, WebappState>,
-) -> Result<Redirect, Option<Flash<Redirect>>> {
+) -> Result<Redirect, Template> {
     let (tx, rx) = oneshot::channel();
     state
         .tx
@@ -246,12 +254,16 @@ pub async fn edit_page_post(
 
     let res = rx.await.map_err(log_warn).unwrap();
     if !res.is_ok() {
-        return Err(Some(Flash::error(
-            Redirect::to(format!("/edit/{}", file.display())),
-            res.msg()
-                .cloned()
-                .unwrap_or("Something went wrong :(".to_string()),
-        )));
+        let context = EditContext {
+            file,
+            content: form.content.clone(),
+            message: Some(
+                res.msg()
+                    .cloned()
+                    .unwrap_or("Something went wrong :(".to_string()),
+            ),
+        };
+        return Err(Template::render("edit_page", &context));
     }
 
     let html_file = file.with_extension("html");
